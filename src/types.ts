@@ -8,7 +8,6 @@ export type Config = {
   geminiApiKey: string;
   promptPath: string;
   outputPath: string;
-  artifactName: string;
   model: string;
   temperature: number;
   maxLinkedItems: number;

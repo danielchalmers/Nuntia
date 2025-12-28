@@ -24,15 +24,16 @@ async function run(): Promise<void> {
   console.log(`✨ Generating release notes with ${cfg.model} (temp ${cfg.temperature})...`);
   const { text, inputTokens, outputTokens } = await gemini.generateText(payload, 2, 5000);
 
+  const artifactName = 'nuntia-release-notes';
   const outputPath = writeTextFile(cfg.outputPath, text);
-  await uploadArtifact(cfg.artifactName, outputPath);
+  await uploadArtifact(artifactName, outputPath);
 
   core.setOutput('release-notes-path', outputPath);
-  core.setOutput('release-notes-artifact', cfg.artifactName);
+  core.setOutput('release-notes-artifact', artifactName);
   core.setOutput('input-tokens', String(inputTokens));
   core.setOutput('output-tokens', String(outputTokens));
 
-  console.log(`✅ Release notes saved to ${outputPath} and uploaded as artifact '${cfg.artifactName}'.`);
+  console.log(`✅ Release notes saved to ${outputPath} and uploaded as artifact '${artifactName}'.`);
 }
 
 run().catch(err => {

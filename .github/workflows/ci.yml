@@ -37,7 +37,6 @@ jobs:
           head-commit: ${{ github.sha }}
           branch: ${{ github.ref_name }}
           prompt-path: examples/Nuntia.prompt
-          artifact-name: nuntia-ci-${{ github.run_number }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}

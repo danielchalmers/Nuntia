@@ -31,10 +31,6 @@ inputs:
     description: "Path where the generated release notes markdown is written."
     required: false
     default: "artifacts/nuntia-release-notes.md"
-  artifact-name:
-    description: "Artifact name used when uploading the generated release notes."
-    required: false
-    default: "nuntia-release-notes"
   max-linked-items:
     description: "Cap on how many linked issues, PRs, or commits are fetched."
     required: false

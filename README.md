@@ -62,7 +62,6 @@ jobs:
 | `model` | Gemini model identifier. | `gemini-3-flash-preview` |
 | `temperature` | Model sampling temperature (`0` deterministic → `2` exploratory). | `1.0` |
 | `output-path` | Output markdown path for release notes. | `artifacts/nuntia-release-notes.md` |
-| `artifact-name` | Artifact name for the release notes file. | `nuntia-release-notes` |
 | `max-linked-items` | Maximum linked issues/PRs/commits to fetch. | `100` |
 | `max-reference-depth` | Depth to follow references inside linked descriptions. | `2` |
 
