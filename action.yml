@@ -22,11 +22,11 @@ inputs:
   model:
     description: "Gemini model identifier used to generate release notes."
     required: false
-    default: "gemini-2.5-pro"
+    default: "gemini-3-flash-preview"
   temperature:
     description: "Sampling temperature for the model (0-2)."
     required: false
-    default: "0.4"
+    default: "1.0"
   output-path:
     description: "Path where the generated release notes markdown is written."
     required: false

@@ -59,8 +59,8 @@ jobs:
 | `head-commit` | End commit SHA (inclusive). | - |
 | `branch` | Branch name associated with the range. | - |
 | `prompt-path` | Path to your release notes prompt. | `.github/Nuntia.prompt` |
-| `model` | Gemini model identifier. | `gemini-2.5-pro` |
-| `temperature` | Model sampling temperature (`0` deterministic → `2` exploratory). | `0.4` |
+| `model` | Gemini model identifier. | `gemini-3-flash-preview` |
+| `temperature` | Model sampling temperature (`0` deterministic → `2` exploratory). | `1.0` |
 | `output-path` | Output markdown path for release notes. | `artifacts/nuntia-release-notes.md` |
 | `artifact-name` | Artifact name for the release notes file. | `nuntia-release-notes` |
 | `max-linked-items` | Maximum linked issues/PRs/commits to fetch. | `100` |
