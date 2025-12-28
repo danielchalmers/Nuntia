@@ -1,0 +1,17 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "type": "pwa-node",
+      "request": "launch",
+      "name": "Run Nuntia (dist)",
+      "program": "${workspaceFolder}/dist/index.js",
+      "preLaunchTask": "build",
+      "skipFiles": ["<node_internals>/**"],
+      "env": {
+        // Provide a token if you want to test API calls locally
+        // "GITHUB_TOKEN": ""
+      }
+    }
+  ]
+}

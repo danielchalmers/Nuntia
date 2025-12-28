@@ -1,0 +1,16 @@
+{
+  // Hide build outputs from file explorer and search
+  "files.exclude": {
+    "dist": true
+  },
+  // Prevent these from showing in global/workspace search results
+  "search.exclude": {
+    "dist": true,
+    "node_modules": true,
+    "**/*.tsbuildinfo": true,
+    "**/*.map": true
+  },
+  "cSpell.words": [
+    "Nuntia"
+  ],
+}
