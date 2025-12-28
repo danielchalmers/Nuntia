@@ -26,7 +26,8 @@ async function run(): Promise<void> {
 
   const artifactName = 'nuntia-release-notes';
   const outputPath = writeTextFile('artifacts/nuntia-release-notes.md', text);
-  await uploadArtifact(artifactName, outputPath);
+  const payloadPath = writeTextFile('artifacts/nuntia-payload.json', JSON.stringify(payload, null, 2));
+  await uploadArtifact(artifactName, [outputPath, payloadPath]);
 
   core.setOutput('release-notes-path', outputPath);
   core.setOutput('input-tokens', String(inputTokens));

@@ -36,12 +36,6 @@ Generate AI-authored release notes and migration guides from a commit range, on 
 | `input-tokens` | Gemini prompt token count. |
 | `output-tokens` | Gemini output token count. |
 
-## Example output format
-
-```
-
-```
-
 ## License
 
 MIT
