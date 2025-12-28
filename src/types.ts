@@ -53,6 +53,21 @@ export type LinkedItem = {
 };
 
 export type ReleaseContext = {
+  generatedAt: string;
+  inputs: {
+    baseCommit: string;
+    headCommit: string;
+    branch: string;
+    promptPath: string;
+    model: string;
+    temperature: number;
+    maxLinkedItems: number;
+    maxReferenceDepth: number;
+  };
+  stats: {
+    commitCount: number;
+    linkedItemCount: number;
+  };
   repository: {
     owner: string;
     repo: string;

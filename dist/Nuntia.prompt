@@ -8,6 +8,14 @@ Use this exact Markdown structure and headings. Do not add extra sections.
 
 # Release Notes
 
+Release metadata:
+- Generated at: {generatedAt}
+- Repository: {repository.owner}/{repository.repo}
+- Branch: {repository.branch}
+- Commit range: {range.base}..{range.head} (inclusive)
+- Commits in range: {stats.commitCount}
+- Linked items included: {stats.linkedItemCount}
+
 ## 🚨 Breaking Changes
 Use one entry per change in this exact pattern:
 

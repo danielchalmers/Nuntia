@@ -178,6 +178,21 @@ export async function buildReleaseContext(cfg: Config, gh: GitHubClient): Promis
   }
 
   return {
+    generatedAt: new Date().toISOString(),
+    inputs: {
+      baseCommit: cfg.baseCommit,
+      headCommit: cfg.headCommit,
+      branch: cfg.branch,
+      promptPath: cfg.promptPath,
+      model: cfg.model,
+      temperature: cfg.temperature,
+      maxLinkedItems: cfg.maxLinkedItems,
+      maxReferenceDepth: cfg.maxReferenceDepth,
+    },
+    stats: {
+      commitCount: commitEntries.length,
+      linkedItemCount: linkedItems.size,
+    },
     repository: {
       owner: cfg.owner,
       repo: cfg.repo,
