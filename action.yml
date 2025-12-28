@@ -30,7 +30,7 @@ inputs:
   max-linked-items:
     description: "Cap on how many linked issues, PRs, or commits are fetched."
     required: false
-    default: "100"
+    default: "3"
   max-reference-depth:
     description: "Depth to follow references inside linked descriptions."
     required: false

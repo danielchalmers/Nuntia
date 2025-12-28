@@ -25,7 +25,7 @@ Generate AI-authored release notes and migration guides from a commit range, on 
 | `prompt-path` | Path to your release notes prompt. | `.github/Nuntia.prompt` |
 | `model` | Gemini model identifier. | `gemini-3-flash-preview` |
 | `temperature` | Model temperature (`0` deterministic → `2` exploratory). | `1.0` |
-| `max-linked-items` | Maximum linked issues/PRs/commits to fetch. | `100` |
+| `max-linked-items` | Maximum linked issues/PRs/commits to fetch. | `3` |
 | `max-reference-depth` | Depth to follow references inside linked descriptions. | `2` |
 
 ## Outputs

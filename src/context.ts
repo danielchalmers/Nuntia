@@ -68,6 +68,16 @@ function normalizeCommitReference(ref: Reference, knownCommits: Set<string>): Re
   return { ...ref, id: normalized };
 }
 
+const MAX_COMMIT_MESSAGE_LENGTH = 300;
+const MAX_LINKED_ITEM_TITLE_LENGTH = 200;
+const MAX_LINKED_ITEM_BODY_LENGTH = 2000;
+
+function truncateText(text: string, maxLength: number): string {
+  if (maxLength <= 0 || text.length <= maxLength) return text;
+  if (maxLength <= 3) return text.slice(0, maxLength);
+  return `${text.slice(0, maxLength - 3).trimEnd()}...`;
+}
+
 export async function buildReleaseContext(cfg: Config, gh: GitHubClient): Promise<ReleaseContext> {
   const { commits: compareCommits, status, totalCommits } = await gh.compareCommits(cfg.baseCommit, cfg.headCommit);
   let commits: CommitDetails[] = [];
@@ -177,6 +187,24 @@ export async function buildReleaseContext(cfg: Config, gh: GitHubClient): Promis
     range.status = status;
   }
 
+  for (const commitInfo of commitEntries) {
+    commitInfo.message = truncateText(commitInfo.message, MAX_COMMIT_MESSAGE_LENGTH);
+  }
+
+  const linkedItemsList: LinkedItem[] = Array.from(linkedItems.values()).map(item => {
+    const trimmed: LinkedItem = { ...item };
+    if (trimmed.message) {
+      trimmed.message = truncateText(trimmed.message, MAX_COMMIT_MESSAGE_LENGTH);
+    }
+    if (trimmed.title) {
+      trimmed.title = truncateText(trimmed.title, MAX_LINKED_ITEM_TITLE_LENGTH);
+    }
+    if (trimmed.body) {
+      trimmed.body = truncateText(trimmed.body, MAX_LINKED_ITEM_BODY_LENGTH);
+    }
+    return trimmed;
+  });
+
   return {
     generatedAt: new Date().toISOString(),
     inputs: {
@@ -191,7 +219,7 @@ export async function buildReleaseContext(cfg: Config, gh: GitHubClient): Promis
     },
     stats: {
       commitCount: commitEntries.length,
-      linkedItemCount: linkedItems.size,
+      linkedItemCount: linkedItemsList.length,
     },
     repository: {
       owner: cfg.owner,
@@ -200,6 +228,6 @@ export async function buildReleaseContext(cfg: Config, gh: GitHubClient): Promis
     },
     range,
     commits: commitEntries,
-    linkedItems: Array.from(linkedItems.values()),
+    linkedItems: linkedItemsList,
   };
 }
