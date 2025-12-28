@@ -34,8 +34,8 @@ describe('buildPrompt', () => {
 
       const { systemPrompt, userPrompt } = buildPrompt(context, promptPath);
       expect(systemPrompt).toContain('Test prompt content');
-      expect(userPrompt).toContain('"base":"a1b2c3d"');
-      expect(userPrompt).toContain('"head":"d4e5f6g"');
+      expect(userPrompt).toContain('"base": "a1b2c3d"');
+      expect(userPrompt).toContain('"head": "d4e5f6g"');
     } finally {
       fs.unlinkSync(promptPath);
     }

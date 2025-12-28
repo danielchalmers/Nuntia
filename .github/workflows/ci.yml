@@ -33,6 +33,7 @@ jobs:
           head-commit: ${{ github.sha }}
           branch: ${{ github.ref_name }}
           prompt-path: examples/Nuntia.prompt
+          model: "gemini-2.5-flash"
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
