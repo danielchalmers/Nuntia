@@ -13,6 +13,32 @@ function requireInput(name: string): string {
   return value;
 }
 
+type BranchTarget = {
+  owner: string;
+  repo: string;
+  branch: string;
+};
+
+function parseBranchInput(input: string, fallbackOwner: string, fallbackRepo: string): BranchTarget {
+  const trimmed = input.trim();
+  if (!trimmed) {
+    throw new Error('Missing required input: branch.');
+  }
+
+  const match = trimmed.match(/^([^/\s]+)\/([^@\s]+)@(.+)$/);
+  if (match && match[1] && match[2] && match[3]) {
+    const owner = match[1];
+    const repo = match[2];
+    const branch = match[3].trim();
+    if (!branch) {
+      throw new Error('Branch input uses owner/repo@branch format but branch is empty.');
+    }
+    return { owner, repo, branch };
+  }
+
+  return { owner: fallbackOwner, repo: fallbackRepo, branch: trimmed };
+}
+
 /**
  * Resolve runtime config. Throws early with actionable messages if mandatory
  * secrets (GITHUB_TOKEN, GEMINI_API_KEY) are missing or repo context is absent.
@@ -31,9 +57,6 @@ export function getConfig(): Config {
   const payloadRepo: any = (github as any).context?.payload?.repository;
   if (!owner && payloadRepo?.owner?.login) owner = String(payloadRepo.owner.login);
   if (!repo && payloadRepo?.name) repo = String(payloadRepo.name);
-  if (!owner || !repo) {
-    throw new Error('Failed to resolve repository context (owner/repo). Ensure this runs in GitHub Actions with a valid repository context.');
-  }
 
   const token = process.env.GITHUB_TOKEN || '';
   const geminiApiKey = process.env.GEMINI_API_KEY || '';
@@ -43,7 +66,14 @@ export function getConfig(): Config {
 
   const baseCommit = requireInput('base-commit');
   const headCommit = requireInput('head-commit');
-  const branch = requireInput('branch');
+  const rawBranch = requireInput('branch');
+  const branchTarget = parseBranchInput(rawBranch, owner || '', repo || '');
+  owner = branchTarget.owner;
+  repo = branchTarget.repo;
+  const branch = branchTarget.branch;
+  if (!owner || !repo) {
+    throw new Error('Failed to resolve repository context (owner/repo). Ensure this runs in GitHub Actions with a valid repository context or pass branch as owner/repo@branch.');
+  }
   const promptPath = core.getInput('prompt-path') || '.github/Nuntia.prompt';
   const model = core.getInput('model') || 'gemini-3-flash-preview';
   const temperature = parseNumber(core.getInput('temperature') || '1.0', 1.0);

@@ -21,10 +21,10 @@ Generate AI-authored release notes and migration guides from a commit range, on 
 | --- | --- | --- |
 | `base-commit` | Start commit SHA (inclusive). | - |
 | `head-commit` | End commit SHA (inclusive). | - |
-| `branch` | Branch name associated with the range. | - |
+| `branch` | Branch name (`branch` or `owner/repo@branch`). | - |
 | `prompt-path` | Path to your release notes prompt. | `.github/Nuntia.prompt` |
 | `model` | Gemini model identifier. | `gemini-3-flash-preview` |
-| `temperature` | Model sampling temperature (`0` deterministic → `2` exploratory). | `1.0` |
+| `temperature` | Model temperature (`0` deterministic → `2` exploratory). | `1.0` |
 | `max-linked-items` | Maximum linked issues/PRs/commits to fetch. | `100` |
 | `max-reference-depth` | Depth to follow references inside linked descriptions. | `2` |
 
