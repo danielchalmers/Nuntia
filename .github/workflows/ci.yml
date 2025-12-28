@@ -40,3 +40,9 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v6
+        with:
+          name: ci-${{ github.run_number }}
+          path: artifacts
+          if-no-files-found: error
