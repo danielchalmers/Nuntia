@@ -31,6 +31,7 @@ export function extractReferences(text: string, defaultOwner: string, defaultRep
   ISSUE_URL.lastIndex = 0;
   while ((match = ISSUE_URL.exec(text)) !== null) {
     const [, owner, repo, kind, number] = match;
+    if (!owner || !repo || !number || !kind) continue;
     addRef({
       type: kind === 'pull' ? 'pull' : 'issue',
       owner,
@@ -42,6 +43,7 @@ export function extractReferences(text: string, defaultOwner: string, defaultRep
   COMMIT_URL.lastIndex = 0;
   while ((match = COMMIT_URL.exec(text)) !== null) {
     const [, owner, repo, sha] = match;
+    if (!owner || !repo || !sha) continue;
     addRef({
       type: 'commit',
       owner,
@@ -53,6 +55,7 @@ export function extractReferences(text: string, defaultOwner: string, defaultRep
   CROSS_REPO_ISSUE.lastIndex = 0;
   while ((match = CROSS_REPO_ISSUE.exec(text)) !== null) {
     const [, owner, repo, number] = match;
+    if (!owner || !repo || !number) continue;
     addRef({
       type: 'issue',
       owner,
@@ -64,6 +67,7 @@ export function extractReferences(text: string, defaultOwner: string, defaultRep
   SHORT_ISSUE.lastIndex = 0;
   while ((match = SHORT_ISSUE.exec(text)) !== null) {
     const [, number] = match;
+    if (!number) continue;
     addRef({
       type: 'issue',
       owner: defaultOwner,

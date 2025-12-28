@@ -103,6 +103,7 @@ export async function buildReleaseContext(cfg: Config, gh: GitHubClient): Promis
   while (index < queue.length) {
     if (cfg.maxLinkedItems > 0 && linkedItems.size >= cfg.maxLinkedItems) break;
     const item = queue[index++];
+    if (!item) break;
     if (item.depth > cfg.maxReferenceDepth) continue;
 
     const normalizedRef = normalizeCommitReference(item.ref, knownCommits);
@@ -167,18 +168,22 @@ export async function buildReleaseContext(cfg: Config, gh: GitHubClient): Promis
     }
   }
 
+  const range: ReleaseContext['range'] = {
+    base: cfg.baseCommit,
+    head: cfg.headCommit,
+    totalCommits: commitEntries.length,
+  };
+  if (status !== undefined) {
+    range.status = status;
+  }
+
   return {
     repository: {
       owner: cfg.owner,
       repo: cfg.repo,
       branch: cfg.branch,
     },
-    range: {
-      base: cfg.baseCommit,
-      head: cfg.headCommit,
-      status,
-      totalCommits: commitEntries.length,
-    },
+    range,
     commits: commitEntries,
     linkedItems: Array.from(linkedItems.values()),
   };
