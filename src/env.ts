@@ -45,7 +45,6 @@ export function getConfig(): Config {
   const headCommit = requireInput('head-commit');
   const branch = requireInput('branch');
   const promptPath = core.getInput('prompt-path') || '.github/Nuntia.prompt';
-  const outputPath = core.getInput('output-path') || 'artifacts/nuntia-release-notes.md';
   const model = core.getInput('model') || 'gemini-3-flash-preview';
   const temperature = parseNumber(core.getInput('temperature') || '1.0', 1.0);
   const maxLinkedItems = Math.max(0, Math.floor(parseNumber(core.getInput('max-linked-items') || '100', 100)));
@@ -60,7 +59,6 @@ export function getConfig(): Config {
     token,
     geminiApiKey,
     promptPath,
-    outputPath,
     model,
     temperature,
     maxLinkedItems,

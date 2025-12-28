@@ -27,10 +27,6 @@ inputs:
     description: "Sampling temperature for the model (0-2)."
     required: false
     default: "1.0"
-  output-path:
-    description: "Path where the generated release notes markdown is written."
-    required: false
-    default: "artifacts/nuntia-release-notes.md"
   max-linked-items:
     description: "Cap on how many linked issues, PRs, or commits are fetched."
     required: false
@@ -43,8 +39,6 @@ inputs:
 outputs:
   release-notes-path:
     description: "Filesystem path to the generated release notes markdown."
-  release-notes-artifact:
-    description: "Artifact name containing the release notes."
   input-tokens:
     description: "Gemini input token count."
   output-tokens:

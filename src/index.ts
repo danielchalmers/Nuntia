@@ -25,11 +25,10 @@ async function run(): Promise<void> {
   const { text, inputTokens, outputTokens } = await gemini.generateText(payload, 2, 5000);
 
   const artifactName = 'nuntia-release-notes';
-  const outputPath = writeTextFile(cfg.outputPath, text);
+  const outputPath = writeTextFile('artifacts/nuntia-release-notes.md', text);
   await uploadArtifact(artifactName, outputPath);
 
   core.setOutput('release-notes-path', outputPath);
-  core.setOutput('release-notes-artifact', artifactName);
   core.setOutput('input-tokens', String(inputTokens));
   core.setOutput('output-tokens', String(outputTokens));
 

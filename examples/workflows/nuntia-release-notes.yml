@@ -28,6 +28,7 @@ jobs:
     steps:
       - uses: actions/checkout@v5
       - name: Generate release notes
+        id: nuntia
         uses: danielchalmers/Nuntia@main
         with:
           base-commit: ${{ inputs.base-commit }}
@@ -37,3 +38,9 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+      - name: Upload release notes artifact
+        uses: actions/upload-artifact@v6
+        with:
+          name: nuntia-release-notes-${{ github.run_number }}
+          path: ${{ steps.nuntia.outputs.release-notes-path }}
+          if-no-files-found: error
