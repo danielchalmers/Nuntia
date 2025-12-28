@@ -204,13 +204,6 @@ These are uploaded as workflow artifacts by the action itself.
 - Ensure `GITHUB_TOKEN` is set in `.env`
 - Check internet connectivity
 
-### dist Out of Sync
-
-**Issue**: CI fails with "Ensure dist is up to date"
-- Run `npm run build` locally
-- Commit the updated dist folder
-- Push changes
-
 ## Best Practices
 
 1. **Always rebuild dist** after changing source code

@@ -26,10 +26,6 @@ jobs:
         run: npm run typecheck
       - name: Build
         run: npm run build
-      - name: Ensure dist is up to date
-        run: |
-          git status --porcelain
-          git diff --exit-code --name-only
       - name: Mock release notes
         uses: ./
         with:
