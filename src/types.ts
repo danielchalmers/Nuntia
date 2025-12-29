@@ -11,6 +11,7 @@ export type Config = {
   temperature: number;
   maxLinkedItems: number;
   maxReferenceDepth: number;
+  maxItemBodyLength: number;
 };
 
 export type ReferenceType = 'issue' | 'pull' | 'commit';
@@ -63,6 +64,7 @@ export type ReleaseContext = {
     temperature: number;
     maxLinkedItems: number;
     maxReferenceDepth: number;
+    maxItemBodyLength: number;
   };
   stats: {
     commitCount: number;

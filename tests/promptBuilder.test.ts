@@ -13,6 +13,7 @@ describe('buildPrompt', () => {
       temperature: 1,
       maxLinkedItems: 3,
       maxReferenceDepth: 2,
+      maxItemBodyLength: 3000,
     },
     stats: {
       commitCount: 0,

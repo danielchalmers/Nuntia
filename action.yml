@@ -35,6 +35,10 @@ inputs:
     description: "Depth to follow references inside linked descriptions."
     required: false
     default: "2"
+  max-item-body-length:
+    description: "Maximum length for commit messages and linked item bodies."
+    required: false
+    default: "3000"
 
 outputs:
   release-notes-path:

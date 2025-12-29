@@ -79,6 +79,10 @@ export function getConfig(): Config {
   const temperature = parseNumber(core.getInput('temperature') || '1.0', 1.0);
   const maxLinkedItems = Math.max(0, Math.floor(parseNumber(core.getInput('max-linked-items') || '3', 3)));
   const maxReferenceDepth = Math.max(0, Math.floor(parseNumber(core.getInput('max-reference-depth') || '2', 2)));
+  const maxItemBodyLength = Math.max(
+    0,
+    Math.floor(parseNumber(core.getInput('max-item-body-length') || '3000', 3000))
+  );
 
   return {
     owner,
@@ -93,5 +97,6 @@ export function getConfig(): Config {
     temperature,
     maxLinkedItems,
     maxReferenceDepth,
+    maxItemBodyLength,
   };
 }

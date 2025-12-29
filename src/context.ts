@@ -68,10 +68,6 @@ function normalizeCommitReference(ref: Reference, knownCommits: Set<string>): Re
   return { ...ref, id: normalized };
 }
 
-const MAX_COMMIT_MESSAGE_LENGTH = 300;
-const MAX_LINKED_ITEM_TITLE_LENGTH = 200;
-const MAX_LINKED_ITEM_BODY_LENGTH = 2000;
-
 function truncateText(text: string, maxLength: number): string {
   if (maxLength <= 0 || text.length <= maxLength) return text;
   if (maxLength <= 3) return text.slice(0, maxLength);
@@ -187,20 +183,19 @@ export async function buildReleaseContext(cfg: Config, gh: GitHubClient): Promis
     range.status = status;
   }
 
+  const maxItemBodyLength = cfg.maxItemBodyLength;
+
   for (const commitInfo of commitEntries) {
-    commitInfo.message = truncateText(commitInfo.message, MAX_COMMIT_MESSAGE_LENGTH);
+    commitInfo.message = truncateText(commitInfo.message, maxItemBodyLength);
   }
 
   const linkedItemsList: LinkedItem[] = Array.from(linkedItems.values()).map(item => {
     const trimmed: LinkedItem = { ...item };
     if (trimmed.message) {
-      trimmed.message = truncateText(trimmed.message, MAX_COMMIT_MESSAGE_LENGTH);
-    }
-    if (trimmed.title) {
-      trimmed.title = truncateText(trimmed.title, MAX_LINKED_ITEM_TITLE_LENGTH);
+      trimmed.message = truncateText(trimmed.message, maxItemBodyLength);
     }
     if (trimmed.body) {
-      trimmed.body = truncateText(trimmed.body, MAX_LINKED_ITEM_BODY_LENGTH);
+      trimmed.body = truncateText(trimmed.body, maxItemBodyLength);
     }
     return trimmed;
   });
@@ -216,6 +211,7 @@ export async function buildReleaseContext(cfg: Config, gh: GitHubClient): Promis
       temperature: cfg.temperature,
       maxLinkedItems: cfg.maxLinkedItems,
       maxReferenceDepth: cfg.maxReferenceDepth,
+      maxItemBodyLength: cfg.maxItemBodyLength,
     },
     stats: {
       commitCount: commitEntries.length,
