@@ -37,7 +37,8 @@ export class GitHubClient {
 
   private mapCommit(data: any): CommitDetails {
     const message = data?.commit?.message || '';
-    const author = data?.commit?.author?.name || data?.author?.login || 'unknown';
+    const login = data?.author?.login || data?.committer?.login || '';
+    const author = login ? (login.startsWith('@') ? login : `@${login}`) : (data?.commit?.author?.name || data?.commit?.committer?.name || 'unknown');
     const date = data?.commit?.author?.date || data?.commit?.committer?.date || '';
     return {
       sha: data?.sha || '',

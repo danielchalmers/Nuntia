@@ -21,7 +21,7 @@ async function run(): Promise<void> {
     temperature: cfg.temperature,
     maxLinkedItems: cfg.maxLinkedItems,
     maxReferenceDepth: cfg.maxReferenceDepth,
-    maxItemBodyLength: cfg.maxItemBodyLength,
+    maxItemLength: cfg.maxItemLength,
   });
 
   const context = await buildReleaseContext(cfg, gh);

@@ -9,15 +9,35 @@ type QueueEntry = {
   source: string;
 };
 
+const MARKDOWN_COMMENT = /<!--[\s\S]*?-->/g;
+const CO_AUTHORED_BY = /^\s*Co-authored-by:.*(?:\r?\n)?/gim;
+
 function getErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-function toCommitInfo(commit: CommitDetails, references: Reference[]): CommitInfo {
+function stripMarkdownComments(text: string): string {
+  if (!text) return text;
+  return text.replace(MARKDOWN_COMMENT, '');
+}
+
+function stripCoAuthoredBy(text: string): string {
+  if (!text) return text;
+  return text.replace(CO_AUTHORED_BY, '');
+}
+
+function sanitizeCommitMessage(message: string): string {
+  return stripCoAuthoredBy(stripMarkdownComments(message));
+}
+
+function sanitizeLinkedText(text: string): string {
+  return stripMarkdownComments(text);
+}
+
+function toCommitInfo(commit: CommitDetails, references: Reference[], message: string): CommitInfo {
   return {
     sha: commit.sha,
-    shortSha: commit.sha.slice(0, 7),
-    message: commit.message,
+    message,
     url: commit.url,
     author: commit.author,
     date: commit.date,
@@ -25,26 +45,32 @@ function toCommitInfo(commit: CommitDetails, references: Reference[]): CommitInf
   };
 }
 
-function toLinkedCommit(commit: CommitDetails, owner: string, repo: string, source: string): LinkedItem {
+function toLinkedCommit(
+  commit: CommitDetails,
+  owner: string,
+  repo: string,
+  source: string,
+  message: string
+): LinkedItem {
   return {
     type: 'commit',
     owner,
     repo,
     id: commit.sha,
-    message: commit.message,
+    message,
     url: commit.url,
     referencedBy: [source],
   };
 }
 
-function toLinkedIssue(details: IssueOrPullDetails, source: string): LinkedItem {
+function toLinkedIssue(details: IssueOrPullDetails, source: string, title: string, body: string): LinkedItem {
   return {
     type: details.type === 'pull' ? 'pull' : 'issue',
     owner: details.owner,
     repo: details.repo,
     id: String(details.number),
-    title: details.title,
-    body: details.body,
+    title,
+    body,
     url: details.url,
     state: details.state,
     referencedBy: [source],
@@ -74,6 +100,45 @@ function truncateText(text: string, maxLength: number): string {
   return `${text.slice(0, maxLength - 3).trimEnd()}...`;
 }
 
+function buildTitleBody(title?: string, body?: string): { title?: string; body?: string } {
+  const result: { title?: string; body?: string } = {};
+  if (typeof title === 'string') result.title = title;
+  if (typeof body === 'string') result.body = body;
+  return result;
+}
+
+function applyTitleBodyLimit(
+  title: string | undefined,
+  body: string | undefined,
+  maxLength: number
+): { title?: string; body?: string } {
+  if (maxLength <= 0) {
+    return buildTitleBody(title, body);
+  }
+  const hasTitle = typeof title === 'string' && title.length > 0;
+  const hasBody = typeof body === 'string' && body.length > 0;
+  const safeTitle = title || '';
+  const safeBody = body || '';
+  const joiner = hasTitle && hasBody ? '\n\n' : '';
+  const combined = `${safeTitle}${joiner}${safeBody}`;
+  if (combined.length <= maxLength) {
+    return buildTitleBody(hasTitle ? safeTitle : undefined, hasBody ? safeBody : undefined);
+  }
+
+  if (!hasTitle) {
+    const trimmedBody = hasBody ? truncateText(safeBody, maxLength) : undefined;
+    return buildTitleBody(undefined, trimmedBody && trimmedBody.length ? trimmedBody : undefined);
+  }
+
+  if (safeTitle.length >= maxLength) {
+    return buildTitleBody(truncateText(safeTitle, maxLength), undefined);
+  }
+
+  const remaining = Math.max(0, maxLength - safeTitle.length - (hasBody ? joiner.length : 0));
+  const trimmedBody = hasBody && remaining > 0 ? truncateText(safeBody, remaining) : undefined;
+  return buildTitleBody(safeTitle, trimmedBody && trimmedBody.length ? trimmedBody : undefined);
+}
+
 export async function buildReleaseContext(cfg: Config, gh: GitHubClient): Promise<ReleaseContext> {
   const { commits: compareCommits, status, totalCommits } = await gh.compareCommits(cfg.baseCommit, cfg.headCommit);
   let commits: CommitDetails[] = [];
@@ -90,10 +155,13 @@ export async function buildReleaseContext(cfg: Config, gh: GitHubClient): Promis
   const queue: QueueEntry[] = [];
 
   for (const commit of commits) {
-    const refs = extractReferences(commit.message, cfg.owner, cfg.repo).map(ref => normalizeCommitReference(ref, knownCommits));
-    const commitInfo = toCommitInfo(commit, refs);
+    const cleanedMessage = sanitizeCommitMessage(commit.message);
+    const refs = extractReferences(cleanedMessage, cfg.owner, cfg.repo).map(ref =>
+      normalizeCommitReference(ref, knownCommits)
+    );
+    const commitInfo = toCommitInfo(commit, refs, cleanedMessage);
     commitEntries.push(commitInfo);
-    const source = `commit:${commitInfo.shortSha}`;
+    const source = `commit:${commitInfo.sha.slice(0, 7)}`;
     for (const ref of refs) {
       queue.push({ ref, depth: 1, source });
     }
@@ -139,8 +207,9 @@ export async function buildReleaseContext(cfg: Config, gh: GitHubClient): Promis
           continue;
         }
         knownCommits.add(commitDetails.sha.toLowerCase());
-        const linkedCommit = toLinkedCommit(commitDetails, normalizedRef.owner, normalizedRef.repo, item.source);
-        const refs = extractReferences(commitDetails.message, normalizedRef.owner, normalizedRef.repo)
+        const cleanedMessage = sanitizeCommitMessage(commitDetails.message);
+        const linkedCommit = toLinkedCommit(commitDetails, normalizedRef.owner, normalizedRef.repo, item.source, cleanedMessage);
+        const refs = extractReferences(cleanedMessage, normalizedRef.owner, normalizedRef.repo)
           .map(ref => normalizeCommitReference(ref, knownCommits));
         linkedCommit.references = summarizeReferences(refs);
         linkedItems.set(fullKey, linkedCommit);
@@ -152,8 +221,10 @@ export async function buildReleaseContext(cfg: Config, gh: GitHubClient): Promis
         }
       } else {
         const details = await gh.getIssueOrPullRequest(normalizedRef.owner, normalizedRef.repo, Number(normalizedRef.id));
-        const linkedIssue = toLinkedIssue(details, item.source);
-        const refs = extractReferences(`${details.title}\n\n${details.body}`, normalizedRef.owner, normalizedRef.repo)
+        const cleanedTitle = sanitizeLinkedText(details.title || '');
+        const cleanedBody = sanitizeLinkedText(details.body || '');
+        const linkedIssue = toLinkedIssue(details, item.source, cleanedTitle, cleanedBody);
+        const refs = extractReferences(`${cleanedTitle}\n\n${cleanedBody}`, normalizedRef.owner, normalizedRef.repo)
           .map(ref => normalizeCommitReference(ref, knownCommits));
         linkedIssue.references = summarizeReferences(refs);
         linkedItems.set(key, linkedIssue);
@@ -183,19 +254,29 @@ export async function buildReleaseContext(cfg: Config, gh: GitHubClient): Promis
     range.status = status;
   }
 
-  const maxItemBodyLength = cfg.maxItemBodyLength;
+  const maxItemLength = cfg.maxItemLength;
 
   for (const commitInfo of commitEntries) {
-    commitInfo.message = truncateText(commitInfo.message, maxItemBodyLength);
+    commitInfo.message = truncateText(commitInfo.message, maxItemLength);
   }
 
   const linkedItemsList: LinkedItem[] = Array.from(linkedItems.values()).map(item => {
     const trimmed: LinkedItem = { ...item };
     if (trimmed.message) {
-      trimmed.message = truncateText(trimmed.message, maxItemBodyLength);
+      trimmed.message = truncateText(trimmed.message, maxItemLength);
     }
-    if (trimmed.body) {
-      trimmed.body = truncateText(trimmed.body, maxItemBodyLength);
+    if (trimmed.title || trimmed.body) {
+      const limited = applyTitleBodyLimit(trimmed.title, trimmed.body, maxItemLength);
+      if (typeof limited.title === 'string') {
+        trimmed.title = limited.title;
+      } else {
+        delete trimmed.title;
+      }
+      if (typeof limited.body === 'string') {
+        trimmed.body = limited.body;
+      } else {
+        delete trimmed.body;
+      }
     }
     return trimmed;
   });
@@ -211,11 +292,7 @@ export async function buildReleaseContext(cfg: Config, gh: GitHubClient): Promis
       temperature: cfg.temperature,
       maxLinkedItems: cfg.maxLinkedItems,
       maxReferenceDepth: cfg.maxReferenceDepth,
-      maxItemBodyLength: cfg.maxItemBodyLength,
-    },
-    stats: {
-      commitCount: commitEntries.length,
-      linkedItemCount: linkedItemsList.length,
+      maxItemLength: cfg.maxItemLength,
     },
     repository: {
       owner: cfg.owner,

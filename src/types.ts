@@ -11,7 +11,7 @@ export type Config = {
   temperature: number;
   maxLinkedItems: number;
   maxReferenceDepth: number;
-  maxItemBodyLength: number;
+  maxItemLength: number;
 };
 
 export type ReferenceType = 'issue' | 'pull' | 'commit';
@@ -31,7 +31,6 @@ export type ReferenceSummary = {
 
 export type CommitInfo = {
   sha: string;
-  shortSha: string;
   message: string;
   url: string;
   author: string;
@@ -64,11 +63,7 @@ export type ReleaseContext = {
     temperature: number;
     maxLinkedItems: number;
     maxReferenceDepth: number;
-    maxItemBodyLength: number;
-  };
-  stats: {
-    commitCount: number;
-    linkedItemCount: number;
+    maxItemLength: number;
   };
   repository: {
     owner: string;
