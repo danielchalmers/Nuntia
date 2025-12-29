@@ -15,10 +15,10 @@ inputs:
   branch:
     description: "Branch name associated with the release notes."
     required: true
-  prompt-path:
-    description: "Repo-relative path to the prompt template that defines the release notes format."
-    required: false
-    default: ".github/Nuntia.prompt"
+  prompt-url:
+    description: "URL for prompt template."
+    required: true
+    default: "https://raw.githubusercontent.com/danielchalmers/Nuntia/refs/heads/main/examples/Nuntia.prompt"
   model:
     description: "Gemini model identifier used to generate release notes."
     required: false

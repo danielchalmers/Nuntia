@@ -74,7 +74,7 @@ export function getConfig(): Config {
   if (!owner || !repo) {
     throw new Error('Failed to resolve repository context (owner/repo). Ensure this runs in GitHub Actions with a valid repository context or pass branch as owner/repo@branch.');
   }
-  const promptPath = core.getInput('prompt-path') || '.github/Nuntia.prompt';
+  const promptUrl = core.getInput('prompt-url');
   const model = core.getInput('model') || 'gemini-3-flash-preview';
   const temperature = parseNumber(core.getInput('temperature') || '1.0', 1.0);
   const maxLinkedItems = Math.max(0, Math.floor(parseNumber(core.getInput('max-linked-items') || '3', 3)));
@@ -88,7 +88,7 @@ export function getConfig(): Config {
     headCommit,
     token,
     geminiApiKey,
-    promptPath,
+    promptUrl,
     model,
     temperature,
     maxLinkedItems,

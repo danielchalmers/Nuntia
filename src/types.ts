@@ -6,7 +6,7 @@ export type Config = {
   headCommit: string;
   token: string;
   geminiApiKey: string;
-  promptPath: string;
+  promptUrl: string;
   model: string;
   temperature: number;
   maxLinkedItems: number;
@@ -58,7 +58,7 @@ export type ReleaseContext = {
     baseCommit: string;
     headCommit: string;
     branch: string;
-    promptPath: string;
+    promptUrl: string;
     model: string;
     temperature: number;
     maxLinkedItems: number;

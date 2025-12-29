@@ -32,7 +32,7 @@ jobs:
           base-commit: ${{ github.sha }}
           head-commit: ${{ github.sha }}
           branch: ${{ github.ref_name }}
-          prompt-path: examples/Nuntia.prompt
+          prompt-url: "https://raw.githubusercontent.com/danielchalmers/Nuntia/refs/heads/${{ github.ref_name }}/examples/Nuntia.prompt"
           model: "gemini-2.5-flash"
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

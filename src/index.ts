@@ -2,7 +2,7 @@ import * as core from '@actions/core';
 import { getConfig } from './env';
 import { GitHubClient } from './github';
 import { buildReleaseContext } from './context';
-import { buildPrompt } from './prompt';
+import { buildPrompt, fetchPrompt } from './prompt';
 import { buildTextPayload, GeminiClient } from './gemini';
 import { writeTextFile } from './storage';
 import { uploadArtifact } from './artifacts';
@@ -18,7 +18,8 @@ async function run(): Promise<void> {
   const context = await buildReleaseContext(cfg, gh);
   console.log(`📦 Commit range resolved: ${context.commits.length} commit(s), ${context.linkedItems.length} linked item(s).`);
 
-  const { systemPrompt, userPrompt } = buildPrompt(context, cfg.promptPath);
+  const promptText = await fetchPrompt(cfg.promptUrl);
+  const { systemPrompt, userPrompt } = buildPrompt(context, promptText);
   const payload = buildTextPayload(systemPrompt, userPrompt, cfg.model, cfg.temperature);
 
   console.log(`✨ Generating release notes with ${cfg.model} (temp ${cfg.temperature})...`);

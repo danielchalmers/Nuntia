@@ -211,7 +211,7 @@ export async function buildReleaseContext(cfg: Config, gh: GitHubClient): Promis
       baseCommit: cfg.baseCommit,
       headCommit: cfg.headCommit,
       branch: cfg.branch,
-      promptPath: cfg.promptPath,
+      promptUrl: cfg.promptUrl,
       model: cfg.model,
       temperature: cfg.temperature,
       maxLinkedItems: cfg.maxLinkedItems,

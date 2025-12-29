@@ -20,7 +20,7 @@ Nuntia is a GitHub Action that generates release notes and migration guides from
 Nuntia/
 ├── .github/          # GitHub workflows and configuration
 ├── dist/             # Compiled output (generated, committed to repo)
-├── examples/         # Example prompts and workflows
+├── examples/         # Example workflows
 ├── src/              # TypeScript source code
 ├── tests/            # Test files using Vitest
 ├── action.yml        # GitHub Action metadata
@@ -63,9 +63,8 @@ These are required for running tests and local development.
 
 - `npm run typecheck` - Type-check TypeScript without emitting files
 - `npm run dev` - Watch mode for TypeScript compilation
-- `npm run build` - Full production build (typecheck, clean, bundle, and asset copy)
+- `npm run build` - Full production build (typecheck, clean, and bundle)
 - `npm run clean` - Remove the dist directory
-- `npm run copy-assets` - Copy required assets to dist folder
 - `npm test` - Run all tests once
 - `npm run test:watch` - Run tests in watch mode
 
@@ -111,7 +110,6 @@ This command performs the following steps:
    - Minifies the output
    - Generates source maps
    - Includes license information in `licenses.txt`
-4. **Copy Assets** (`npm run copy-assets`) - Copies `examples/Nuntia.prompt` to dist as the bundled default prompt
 
 #### Important: Commit dist Changes
 
@@ -177,8 +175,8 @@ The action is defined in `action.yml` and runs from `dist/index.js`. Key points:
 - **Entry point**: `dist/index.js`
 - **Runtime**: Node.js 24 (specified in `action.yml`)
 - **Inputs**: Defined in `action.yml`
-- **Default prompt path**: `.github/Nuntia.prompt` (where users place their custom prompt)
-- **Bundled prompt**: `examples/Nuntia.prompt` (copied to dist during build as fallback)
+- **Prompt URL input**: `prompt-url` (required; fetches raw prompt content)
+- **Prompt template**: `examples/Nuntia.prompt` (reference source; not loaded automatically)
 
 ## File Artifacts
 
@@ -218,7 +216,7 @@ These are uploaded as workflow artifacts by the action itself.
 
 - **README.md** - User-facing documentation and setup guide
 - **action.yml** - GitHub Action configuration and input definitions
-- **examples/** - Sample prompts and workflow configurations
+- **examples/** - Prompt template and sample workflow configurations
 - **.github/workflows/** - CI/CD pipeline definitions
 
 ## Questions?
