@@ -83,7 +83,7 @@ export function getConfig(): Config {
   const legacyMaxItemLengthInput = core.getInput('max-item-body-length');
   const maxItemLength = Math.max(
     0,
-    Math.floor(parseNumber(maxItemLengthInput || legacyMaxItemLengthInput || '3000', 3000))
+    Math.floor(parseNumber(maxItemLengthInput || legacyMaxItemLengthInput || '5000', 5000))
   );
 
   return {

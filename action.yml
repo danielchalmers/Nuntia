@@ -38,11 +38,11 @@ inputs:
   max-item-length:
     description: "Maximum combined length for commit messages and linked item titles/bodies."
     required: false
-    default: "3000"
+    default: "5000"
   max-item-body-length:
     description: "Deprecated: use max-item-length. Maximum length for commit messages and linked item bodies."
     required: false
-    default: "3000"
+    default: "5000"
 
 outputs:
   release-notes-path:

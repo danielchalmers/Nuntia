@@ -14,7 +14,7 @@ describe('buildPrompt', () => {
       temperature: 1,
       maxLinkedItems: 3,
       maxReferenceDepth: 2,
-      maxItemLength: 3000,
+      maxItemLength: 5000,
     },
     repository: { owner: 'acme', repo: 'widgets', branch: 'main' },
     range: { base: 'a1b2c3d', head: 'd4e5f6g', totalCommits: 1 },
