@@ -29,6 +29,30 @@ describe('buildPrompt', () => {
     expect(userPrompt).toContain('"head": "d4e5f6g"');
   });
 
+  it('keeps linked item labels in prompt metadata', () => {
+    const { userPrompt } = buildPrompt(
+      {
+        ...context,
+        linkedItems: [
+          {
+            type: 'issue',
+            owner: 'acme',
+            repo: 'widgets',
+            id: '42',
+            title: 'Fix flaky cache invalidation',
+            labels: ['bug', 'release-note'],
+            referencedBy: ['commit:a1b2c3d'],
+          },
+        ],
+      },
+      'Test prompt content'
+    );
+
+    expect(userPrompt).toContain('"labels": [');
+    expect(userPrompt).toContain('"bug"');
+    expect(userPrompt).toContain('"release-note"');
+  });
+
   it('fetches prompt text from the provided url', async () => {
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,

@@ -48,6 +48,7 @@ export type LinkedItem = {
   message?: string;
   url?: string;
   state?: string;
+  labels?: string[];
   referencedBy: string[];
   references?: ReferenceSummary;
 };

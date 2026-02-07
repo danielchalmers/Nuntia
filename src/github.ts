@@ -14,6 +14,7 @@ export type IssueOrPullDetails = {
   body: string;
   url: string;
   state: string;
+  labels: string[];
   type: 'issue' | 'pull';
   owner: string;
   repo: string;
@@ -47,6 +48,27 @@ export class GitHubClient {
       author,
       date,
     };
+  }
+
+  private mapLabels(data: any): string[] {
+    if (!Array.isArray(data?.labels)) return [];
+    const labels: string[] = [];
+
+    for (const label of data.labels) {
+      if (typeof label === 'string') {
+        const trimmed = label.trim();
+        if (trimmed) labels.push(trimmed);
+        continue;
+      }
+
+      const rawName = label?.name;
+      if (typeof rawName === 'string') {
+        const trimmed = rawName.trim();
+        if (trimmed) labels.push(trimmed);
+      }
+    }
+
+    return Array.from(new Set(labels));
   }
 
   async compareCommits(base: string, head: string): Promise<{ commits: CommitDetails[]; status?: string; totalCommits?: number }> {
@@ -90,6 +112,7 @@ export class GitHubClient {
       body: data.body || '',
       url: data.html_url || '',
       state: data.state || 'open',
+      labels: this.mapLabels(data),
       type: data.pull_request ? 'pull' : 'issue',
       owner,
       repo,

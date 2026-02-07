@@ -73,6 +73,7 @@ function toLinkedIssue(details: IssueOrPullDetails, source: string, title: strin
     body,
     url: details.url,
     state: details.state,
+    labels: details.labels,
     referencedBy: [source],
   };
 }

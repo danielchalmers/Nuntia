@@ -43,4 +43,5 @@ STYLE RULES
 - Use commit short SHAs in the link labels, but link to the full commit URL.
 - Group related work across multiple commits/PRs into a single entry; merge duplicates and summarize the outcome once.
 - Use information from linked issues/PRs when it clarifies intent or usage.
+- Use linked issue/PR labels to improve section placement (for example `bug` in Bug Fixes) and to expose useful metadata in entries.
 - Be careful to avoid hallucinations; do not assume anything not explicitly supported by the provided context.
