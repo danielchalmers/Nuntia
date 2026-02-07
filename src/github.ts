@@ -72,20 +72,57 @@ export class GitHubClient {
   }
 
   async compareCommits(base: string, head: string): Promise<{ commits: CommitDetails[]; status?: string; totalCommits?: number }> {
-    this.incrementApiCalls();
-    const { data } = await this.octokit.rest.repos.compareCommits({
-      owner: this.owner,
-      repo: this.repo,
-      base,
-      head,
-      per_page: 100,
-    });
+    const perPage = 100;
+    let page = 1;
+    let status: string | undefined;
+    let totalCommits: number | undefined;
+    const commits: CommitDetails[] = [];
+    const seenShas = new Set<string>();
 
-    return {
-      commits: (data?.commits || []).map((commit: any) => this.mapCommit(commit)),
-      status: data?.status,
-      totalCommits: data?.total_commits,
-    };
+    while (true) {
+      this.incrementApiCalls();
+      const { data } = await this.octokit.rest.repos.compareCommits({
+        owner: this.owner,
+        repo: this.repo,
+        base,
+        head,
+        per_page: perPage,
+        page,
+      });
+
+      if (status === undefined && typeof data?.status === 'string') {
+        status = data.status;
+      }
+      if (totalCommits === undefined && typeof data?.total_commits === 'number') {
+        totalCommits = data.total_commits;
+      }
+
+      const pageCommits = Array.isArray(data?.commits) ? data.commits : [];
+      const initialCount = commits.length;
+
+      for (const commit of pageCommits) {
+        const sha = typeof commit?.sha === 'string' ? commit.sha : '';
+        if (sha && seenShas.has(sha)) continue;
+        if (sha) seenShas.add(sha);
+        commits.push(this.mapCommit(commit));
+      }
+
+      const reachedEndOfPage = pageCommits.length < perPage;
+      const reachedExpectedTotal = typeof totalCommits === 'number' && commits.length >= totalCommits;
+      const madeNoProgress = commits.length === initialCount;
+      if (reachedEndOfPage || reachedExpectedTotal || madeNoProgress) break;
+
+      page++;
+    }
+
+    const result: { commits: CommitDetails[]; status?: string; totalCommits?: number } = { commits };
+    if (typeof status === 'string') {
+      result.status = status;
+    }
+    if (typeof totalCommits === 'number') {
+      result.totalCommits = totalCommits;
+    }
+    return result;
   }
 
   async getCommit(owner: string, repo: string, ref: string): Promise<CommitDetails> {
