@@ -28,16 +28,35 @@ describe('GitHubClient.compareCommits', () => {
     const compareCommits = vi
       .fn()
       .mockResolvedValueOnce({
-        data: { status: 'ahead', total_commits: 306, commits: makePage(0, 100) },
+        data: {
+          status: 'ahead',
+          total_commits: 306,
+          commits: makePage(0, 100),
+          files: [{ filename: 'src/index.ts' }, { filename: 'src/context.ts' }],
+        },
       })
       .mockResolvedValueOnce({
-        data: { status: 'ahead', total_commits: 306, commits: makePage(100, 100) },
+        data: {
+          status: 'ahead',
+          total_commits: 306,
+          commits: makePage(100, 100),
+          files: [{ filename: 'src/context.ts' }, { filename: 'tests/context.test.ts' }],
+        },
       })
       .mockResolvedValueOnce({
-        data: { status: 'ahead', total_commits: 306, commits: makePage(200, 100) },
+        data: {
+          status: 'ahead',
+          total_commits: 306,
+          commits: makePage(200, 100),
+          files: [],
+        },
       })
       .mockResolvedValueOnce({
-        data: { status: 'ahead', total_commits: 306, commits: makePage(300, 6) },
+        data: {
+          status: 'ahead',
+          total_commits: 306,
+          commits: makePage(300, 6),
+        },
       });
 
     const client = new GitHubClient('token', 'acme', 'widgets') as any;
@@ -71,6 +90,7 @@ describe('GitHubClient.compareCommits', () => {
     expect(result.status).toBe('ahead');
     expect(result.totalCommits).toBe(306);
     expect(result.commits).toHaveLength(306);
+    expect(result.files).toEqual(['src/index.ts', 'src/context.ts', 'tests/context.test.ts']);
     expect(client.getApiCallCount()).toBe(4);
   });
 });

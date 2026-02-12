@@ -71,13 +71,18 @@ export class GitHubClient {
     return Array.from(new Set(labels));
   }
 
-  async compareCommits(base: string, head: string): Promise<{ commits: CommitDetails[]; status?: string; totalCommits?: number }> {
+  async compareCommits(
+    base: string,
+    head: string
+  ): Promise<{ commits: CommitDetails[]; status?: string; totalCommits?: number; files: string[] }> {
     const perPage = 100;
     let page = 1;
     let status: string | undefined;
     let totalCommits: number | undefined;
     const commits: CommitDetails[] = [];
     const seenShas = new Set<string>();
+    const files: string[] = [];
+    const seenFiles = new Set<string>();
 
     while (true) {
       this.incrementApiCalls();
@@ -98,6 +103,7 @@ export class GitHubClient {
       }
 
       const pageCommits = Array.isArray(data?.commits) ? data.commits : [];
+      const pageFiles = Array.isArray(data?.files) ? data.files : [];
       const initialCount = commits.length;
 
       for (const commit of pageCommits) {
@@ -105,6 +111,12 @@ export class GitHubClient {
         if (sha && seenShas.has(sha)) continue;
         if (sha) seenShas.add(sha);
         commits.push(this.mapCommit(commit));
+      }
+      for (const file of pageFiles) {
+        const filename = typeof file?.filename === 'string' ? file.filename : '';
+        if (!filename || seenFiles.has(filename)) continue;
+        seenFiles.add(filename);
+        files.push(filename);
       }
 
       const reachedEndOfPage = pageCommits.length < perPage;
@@ -115,7 +127,10 @@ export class GitHubClient {
       page++;
     }
 
-    const result: { commits: CommitDetails[]; status?: string; totalCommits?: number } = { commits };
+    const result: { commits: CommitDetails[]; status?: string; totalCommits?: number; files: string[] } = {
+      commits,
+      files,
+    };
     if (typeof status === 'string') {
       result.status = status;
     }

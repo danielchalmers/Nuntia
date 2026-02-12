@@ -22,7 +22,12 @@ describe('buildReleaseContext', () => {
     };
 
     const gh = {
-      compareCommits: vi.fn().mockResolvedValue({ commits: [], status: 'identical', totalCommits: 0 }),
+      compareCommits: vi.fn().mockResolvedValue({
+        commits: [],
+        status: 'identical',
+        totalCommits: 0,
+        files: ['src/index.ts'],
+      }),
       getCommit: vi.fn().mockResolvedValue({
         sha: 'a1b2c3d4e5f6',
         message: 'Fixes #42',
@@ -46,6 +51,7 @@ describe('buildReleaseContext', () => {
     const context = await buildReleaseContext(cfg, gh);
 
     expect(context.linkedItems).toHaveLength(1);
+    expect(context.range.changedFiles).toEqual(['src/index.ts']);
     expect(context.linkedItems[0]).toMatchObject({
       type: 'issue',
       id: '42',

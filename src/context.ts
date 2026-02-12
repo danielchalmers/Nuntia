@@ -141,7 +141,10 @@ function applyTitleBodyLimit(
 }
 
 export async function buildReleaseContext(cfg: Config, gh: GitHubClient): Promise<ReleaseContext> {
-  const { commits: compareCommits, status, totalCommits } = await gh.compareCommits(cfg.baseCommit, cfg.headCommit);
+  const { commits: compareCommits, status, totalCommits, files } = await gh.compareCommits(
+    cfg.baseCommit,
+    cfg.headCommit
+  );
   let commits: CommitDetails[] = [];
 
   if (cfg.baseCommit === cfg.headCommit) {
@@ -250,6 +253,7 @@ export async function buildReleaseContext(cfg: Config, gh: GitHubClient): Promis
     base: cfg.baseCommit,
     head: cfg.headCommit,
     totalCommits: commitEntries.length,
+    changedFiles: files,
   };
   if (status !== undefined) {
     range.status = status;
