@@ -101,6 +101,14 @@ function truncateText(text: string, maxLength: number): string {
   return `${text.slice(0, maxLength - 3).trimEnd()}...`;
 }
 
+function resolveReferenceTypes(refs: Reference[], linkedItems: Map<string, LinkedItem>): Reference[] {
+  return refs.map(ref => {
+    if (ref.type !== 'issue') return ref;
+    const item = linkedItems.get(referenceKey(ref));
+    return item?.type === 'pull' ? { ...ref, type: 'pull' as const } : ref;
+  });
+}
+
 function buildTitleBody(title?: string, body?: string): { title?: string; body?: string } {
   const result: { title?: string; body?: string } = {};
   if (typeof title === 'string') result.title = title;
@@ -156,6 +164,7 @@ export async function buildReleaseContext(cfg: Config, gh: GitHubClient): Promis
 
   const knownCommits = new Set(commits.map(commit => commit.sha.toLowerCase()));
   const commitEntries: CommitInfo[] = [];
+  const commitRefsMap = new Map<string, Reference[]>();
   const queue: QueueEntry[] = [];
 
   for (const commit of commits) {
@@ -165,6 +174,7 @@ export async function buildReleaseContext(cfg: Config, gh: GitHubClient): Promis
     );
     const commitInfo = toCommitInfo(commit, refs, cleanedMessage);
     commitEntries.push(commitInfo);
+    commitRefsMap.set(commit.sha, refs);
     const source = `commit:${commitInfo.sha.slice(0, 7)}`;
     for (const ref of refs) {
       queue.push({ ref, depth: 1, source });
@@ -176,6 +186,7 @@ export async function buildReleaseContext(cfg: Config, gh: GitHubClient): Promis
   }
 
   const linkedItems = new Map<string, LinkedItem>();
+  const linkedItemRefsMap = new Map<string, Reference[]>();
   let index = 0;
 
   while (index < queue.length) {
@@ -232,6 +243,7 @@ export async function buildReleaseContext(cfg: Config, gh: GitHubClient): Promis
           .map(ref => normalizeCommitReference(ref, knownCommits));
         linkedIssue.references = summarizeReferences(refs);
         linkedItems.set(key, linkedIssue);
+        linkedItemRefsMap.set(key, refs);
         if (item.depth < cfg.maxReferenceDepth) {
           const source = formatSource({
             type: linkedIssue.type,
@@ -246,6 +258,22 @@ export async function buildReleaseContext(cfg: Config, gh: GitHubClient): Promis
       }
     } catch (error) {
       console.warn(`⚠️ Failed to resolve reference ${key}: ${getErrorMessage(error)}`);
+    }
+  }
+
+  // Fix reference type summaries: short-form references like #N are initially
+  // classified as 'issue', but after fetching we know which are actually pull requests.
+  for (const commitInfo of commitEntries) {
+    const refs = commitRefsMap.get(commitInfo.sha);
+    if (refs) {
+      commitInfo.references = summarizeReferences(resolveReferenceTypes(refs, linkedItems));
+    }
+  }
+
+  for (const [key, item] of linkedItems) {
+    const refs = linkedItemRefsMap.get(key);
+    if (refs) {
+      item.references = summarizeReferences(resolveReferenceTypes(refs, linkedItems));
     }
   }
 
