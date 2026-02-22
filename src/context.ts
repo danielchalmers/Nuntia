@@ -179,6 +179,14 @@ export async function buildReleaseContext(cfg: Config, gh: GitHubClient): Promis
     for (const ref of refs) {
       queue.push({ ref, depth: 1, source });
     }
+    try {
+      const associatedPrs = await gh.listPullRequestsForCommit(cfg.owner, cfg.repo, commit.sha);
+      for (const prNumber of associatedPrs) {
+        queue.push({ ref: { type: 'pull', owner: cfg.owner, repo: cfg.repo, id: String(prNumber) }, depth: 1, source });
+      }
+    } catch (error) {
+      console.warn(`⚠️ Failed to list pull requests for commit ${source}: ${getErrorMessage(error)}`);
+    }
   }
 
   if (typeof totalCommits === 'number' && totalCommits + 1 > commits.length) {

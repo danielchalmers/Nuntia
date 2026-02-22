@@ -150,6 +150,16 @@ export class GitHubClient {
     return this.mapCommit(data);
   }
 
+  async listPullRequestsForCommit(owner: string, repo: string, sha: string): Promise<number[]> {
+    this.incrementApiCalls();
+    const { data } = await this.octokit.rest.repos.listPullRequestsAssociatedWithCommit({
+      owner,
+      repo,
+      commit_sha: sha,
+    });
+    return data.map(pr => pr.number);
+  }
+
   async getIssueOrPullRequest(owner: string, repo: string, issueNumber: number): Promise<IssueOrPullDetails> {
     this.incrementApiCalls();
     const { data } = await this.octokit.rest.issues.get({

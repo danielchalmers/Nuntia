@@ -46,6 +46,7 @@ describe('buildReleaseContext', () => {
         owner: 'acme',
         repo: 'widgets',
       }),
+      listPullRequestsForCommit: vi.fn().mockResolvedValue([]),
     } as unknown as GitHubClient;
 
     const context = await buildReleaseContext(baseConfig, gh);
@@ -88,6 +89,7 @@ describe('buildReleaseContext', () => {
         owner: 'acme',
         repo: 'widgets',
       }),
+      listPullRequestsForCommit: vi.fn().mockResolvedValue([]),
     } as unknown as GitHubClient;
 
     const context = await buildReleaseContext(baseConfig, gh);
@@ -104,5 +106,68 @@ describe('buildReleaseContext', () => {
       title: 'Rename action inputs',
       body: 'This PR consolidates and renames the action inputs.',
     });
+  });
+
+  it('includes PR body and transitive issue when PR is discovered via listPullRequestsForCommit', async () => {
+    const gh = {
+      compareCommits: vi.fn().mockResolvedValue({
+        commits: [],
+        status: 'identical',
+        totalCommits: 0,
+        files: [],
+      }),
+      getCommit: vi.fn().mockResolvedValue({
+        sha: 'c3d4e5f6a1b2',
+        message: 'Merge abc into def',
+        url: 'https://github.com/acme/widgets/commit/c3d4e5f6a1b2',
+        author: '@copilot',
+        date: '2026-02-22T20:00:00Z',
+      }),
+      getIssueOrPullRequest: vi.fn()
+        .mockImplementation((owner: string, repo: string, number: number) => {
+          if (number === 3) {
+            return Promise.resolve({
+              number: 3,
+              title: 'Fix type classification',
+              body: 'Fixes the type issue.\n\nCloses #4',
+              url: 'https://github.com/acme/widgets/pull/3',
+              state: 'open',
+              labels: [],
+              type: 'pull',
+              owner,
+              repo,
+            });
+          }
+          if (number === 4) {
+            return Promise.resolve({
+              number: 4,
+              title: 'Type misclassification bug',
+              body: 'PRs referenced as issues when using short-form syntax.',
+              url: 'https://github.com/acme/widgets/issues/4',
+              state: 'open',
+              labels: ['bug'],
+              type: 'issue',
+              owner,
+              repo,
+            });
+          }
+          return Promise.reject(new Error(`Unexpected issue/PR number: ${number}`));
+        }),
+      listPullRequestsForCommit: vi.fn().mockResolvedValue([3]),
+    } as unknown as GitHubClient;
+
+    const context = await buildReleaseContext({ ...baseConfig, maxLinkedItems: 5 }, gh);
+
+    // PR #3 should be discovered and included via listPullRequestsForCommit
+    const pr3 = context.linkedItems.find(item => item.type === 'pull' && item.id === '3');
+    expect(pr3).toBeDefined();
+    expect(pr3?.title).toBe('Fix type classification');
+    expect(pr3?.body).toContain('Closes #4');
+
+    // Issue #4 should be discovered transitively from PR #3's body
+    const issue4 = context.linkedItems.find(item => item.type === 'issue' && item.id === '4');
+    expect(issue4).toBeDefined();
+    expect(issue4?.title).toBe('Type misclassification bug');
+    expect(issue4?.body).toContain('PRs referenced as issues');
   });
 });
