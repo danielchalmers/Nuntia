@@ -108,36 +108,14 @@ function buildTitleBody(title?: string, body?: string): { title?: string; body?:
   return result;
 }
 
-function applyTitleBodyLimit(
+function applyItemTextLimit(
   title: string | undefined,
   body: string | undefined,
   maxLength: number
 ): { title?: string; body?: string } {
-  if (maxLength <= 0) {
-    return buildTitleBody(title, body);
-  }
-  const hasTitle = typeof title === 'string' && title.length > 0;
-  const hasBody = typeof body === 'string' && body.length > 0;
-  const safeTitle = title || '';
-  const safeBody = body || '';
-  const joiner = hasTitle && hasBody ? '\n\n' : '';
-  const combined = `${safeTitle}${joiner}${safeBody}`;
-  if (combined.length <= maxLength) {
-    return buildTitleBody(hasTitle ? safeTitle : undefined, hasBody ? safeBody : undefined);
-  }
-
-  if (!hasTitle) {
-    const trimmedBody = hasBody ? truncateText(safeBody, maxLength) : undefined;
-    return buildTitleBody(undefined, trimmedBody && trimmedBody.length ? trimmedBody : undefined);
-  }
-
-  if (safeTitle.length >= maxLength) {
-    return buildTitleBody(truncateText(safeTitle, maxLength), undefined);
-  }
-
-  const remaining = Math.max(0, maxLength - safeTitle.length - (hasBody ? joiner.length : 0));
-  const trimmedBody = hasBody && remaining > 0 ? truncateText(safeBody, remaining) : undefined;
-  return buildTitleBody(safeTitle, trimmedBody && trimmedBody.length ? trimmedBody : undefined);
+  const trimmedTitle = typeof title === 'string' ? truncateText(title, maxLength) : undefined;
+  const trimmedBody = typeof body === 'string' ? truncateText(body, maxLength) : undefined;
+  return buildTitleBody(trimmedTitle, trimmedBody);
 }
 
 export async function buildReleaseContext(cfg: Config, gh: GitHubClient): Promise<ReleaseContext> {
@@ -225,13 +203,27 @@ export async function buildReleaseContext(cfg: Config, gh: GitHubClient): Promis
         }
       } else {
         const details = await gh.getIssueOrPullRequest(normalizedRef.owner, normalizedRef.repo, Number(normalizedRef.id));
+        const resolvedRef: Reference = {
+          type: details.type,
+          owner: details.owner,
+          repo: details.repo,
+          id: String(details.number),
+        };
+        const resolvedKey = referenceKey(resolvedRef);
+        if (linkedItems.has(resolvedKey)) {
+          const existing = linkedItems.get(resolvedKey);
+          if (existing && !existing.referencedBy.includes(item.source)) {
+            existing.referencedBy.push(item.source);
+          }
+          continue;
+        }
         const cleanedTitle = sanitizeLinkedText(details.title || '');
         const cleanedBody = sanitizeLinkedText(details.body || '');
         const linkedIssue = toLinkedIssue(details, item.source, cleanedTitle, cleanedBody);
         const refs = extractReferences(`${cleanedTitle}\n\n${cleanedBody}`, normalizedRef.owner, normalizedRef.repo)
           .map(ref => normalizeCommitReference(ref, knownCommits));
         linkedIssue.references = summarizeReferences(refs);
-        linkedItems.set(key, linkedIssue);
+        linkedItems.set(resolvedKey, linkedIssue);
         if (item.depth < cfg.maxReferenceDepth) {
           const source = formatSource({
             type: linkedIssue.type,
@@ -271,7 +263,7 @@ export async function buildReleaseContext(cfg: Config, gh: GitHubClient): Promis
       trimmed.message = truncateText(trimmed.message, maxItemLength);
     }
     if (trimmed.title || trimmed.body) {
-      const limited = applyTitleBodyLimit(trimmed.title, trimmed.body, maxItemLength);
+      const limited = applyItemTextLimit(trimmed.title, trimmed.body, maxItemLength);
       if (typeof limited.title === 'string') {
         trimmed.title = limited.title;
       } else {

@@ -33,4 +33,18 @@ Also mentioned: deadbeef1
     expect(summary.issues.sort()).toEqual([1, 2]);
     expect(summary.pulls).toEqual([9]);
   });
+
+  it('treats squash-merge subject suffix as a pull request reference', () => {
+    const refs = extractReferences(
+      'Rename and consolidate action inputs; simplify model temperature behavior (#57)\n\nBody text.',
+      'acme',
+      'widgets'
+    );
+    expect(toKeys(refs)).toEqual(['pull:acme/widgets#57']);
+  });
+
+  it('prefers pull classification over issue for ambiguous short references', () => {
+    const refs = extractReferences('Merge pull request #57 from acme/widgets\n\nFixes #57', 'acme', 'widgets');
+    expect(toKeys(refs)).toEqual(['pull:acme/widgets#57']);
+  });
 });

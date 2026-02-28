@@ -27,8 +27,7 @@ Generate AI-authored release notes and migration guides from a commit range, on 
 | `temperature` | Model temperature (`0` deterministic → `2` exploratory). | `1.0` |
 | `max-linked-items` | Maximum linked issues/PRs/commits to fetch. | `3` |
 | `max-reference-depth` | Depth to follow references inside linked descriptions. | `2` |
-| `max-item-length` | Maximum combined length for commit messages and linked item titles/bodies. | `5000` |
-| `max-item-body-length` | Deprecated; use `max-item-length`. | `5000` |
+| `max-item-length` | Maximum length for each commit message and linked item title/body field. | `5000` |
 
 ## Outputs
 

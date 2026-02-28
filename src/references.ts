@@ -3,6 +3,9 @@ import type { Reference, ReferenceSummary } from './types';
 const ISSUE_URL = /https?:\/\/github\.com\/([A-Za-z0-9_.-]+)\/([A-Za-z0-9_.-]+)\/(issues|pull)\/(\d+)/gi;
 const COMMIT_URL = /https?:\/\/github\.com\/([A-Za-z0-9_.-]+)\/([A-Za-z0-9_.-]+)\/commit\/([a-f0-9]{7,40})/gi;
 const CROSS_REPO_ISSUE = /\b([A-Za-z0-9_.-]+)\/([A-Za-z0-9_.-]+)#(\d+)\b/g;
+const MERGE_PULL = /\bmerge pull request #(\d+)\b/gi;
+const EXPLICIT_PULL = /\b(?:pr|pull request)\s*#(\d+)\b/gi;
+const SUBJECT_PULL_SUFFIX = /\(#(\d+)\)\s*$/i;
 const SHORT_ISSUE = /(?<![A-Za-z0-9_\/])#(\d+)\b/g;
 const COMMIT_SHA = /\b[a-f0-9]{7,40}\b/gi;
 
@@ -16,16 +19,45 @@ export function referenceKey(ref: Reference): string {
 
 export function extractReferences(text: string, defaultOwner: string, defaultRepo: string): Reference[] {
   const refs: Reference[] = [];
-  const seen = new Set<string>();
+  const seenCommits = new Set<string>();
+  const issueOrPullIndex = new Map<string, number>();
 
   const addRef = (ref: Reference) => {
-    const key = referenceKey(ref);
-    if (seen.has(key)) return;
-    seen.add(key);
+    if (ref.type === 'commit') {
+      const key = referenceKey(ref);
+      if (seenCommits.has(key)) return;
+      seenCommits.add(key);
+      refs.push(ref);
+      return;
+    }
+
+    const identity = `${ref.owner}/${ref.repo}#${ref.id}`;
+    const existingIndex = issueOrPullIndex.get(identity);
+    if (typeof existingIndex === 'number') {
+      const existing = refs[existingIndex];
+      if (!existing || existing.type === 'commit') return;
+      if (existing.type === 'pull') return;
+      if (ref.type === 'issue') return;
+      refs[existingIndex] = ref;
+      return;
+    }
+
+    issueOrPullIndex.set(identity, refs.length);
     refs.push(ref);
   };
 
   if (!text) return refs;
+
+  const firstLine = text.split(/\r?\n/, 1)[0]?.trim() || '';
+  const subjectPullMatch = firstLine.match(SUBJECT_PULL_SUFFIX);
+  if (subjectPullMatch?.[1]) {
+    addRef({
+      type: 'pull',
+      owner: defaultOwner,
+      repo: defaultRepo,
+      id: subjectPullMatch[1],
+    });
+  }
 
   let match: RegExpExecArray | null = null;
   ISSUE_URL.lastIndex = 0;
@@ -60,6 +92,30 @@ export function extractReferences(text: string, defaultOwner: string, defaultRep
       type: 'issue',
       owner,
       repo,
+      id: number,
+    });
+  }
+
+  MERGE_PULL.lastIndex = 0;
+  while ((match = MERGE_PULL.exec(text)) !== null) {
+    const number = match[1];
+    if (!number) continue;
+    addRef({
+      type: 'pull',
+      owner: defaultOwner,
+      repo: defaultRepo,
+      id: number,
+    });
+  }
+
+  EXPLICIT_PULL.lastIndex = 0;
+  while ((match = EXPLICIT_PULL.exec(text)) !== null) {
+    const number = match[1];
+    if (!number) continue;
+    addRef({
+      type: 'pull',
+      owner: defaultOwner,
+      repo: defaultRepo,
       id: number,
     });
   }

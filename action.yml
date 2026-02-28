@@ -36,11 +36,7 @@ inputs:
     required: false
     default: "2"
   max-item-length:
-    description: "Maximum combined length for commit messages and linked item titles/bodies."
-    required: false
-    default: "5000"
-  max-item-body-length:
-    description: "Deprecated: use max-item-length. Maximum length for commit messages and linked item bodies."
+    description: "Maximum length for each commit message and linked item title/body field."
     required: false
     default: "5000"
 
