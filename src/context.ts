@@ -11,7 +11,6 @@ type QueueEntry = {
 };
 
 const MARKDOWN_COMMENT = /<!--[\s\S]*?-->/g;
-const CO_AUTHORED_BY = /^\s*Co-authored-by:.*(?:\r?\n)?/gim;
 
 function getErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
@@ -22,13 +21,8 @@ function stripMarkdownComments(text: string): string {
   return text.replace(MARKDOWN_COMMENT, '');
 }
 
-function stripCoAuthoredBy(text: string): string {
-  if (!text) return text;
-  return text.replace(CO_AUTHORED_BY, '');
-}
-
 function sanitizeCommitMessage(message: string): string {
-  return stripCoAuthoredBy(stripMarkdownComments(message));
+  return stripMarkdownComments(message);
 }
 
 function sanitizeLinkedText(text: string): string {
