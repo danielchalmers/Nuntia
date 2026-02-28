@@ -77,7 +77,7 @@ export function getConfig(): Config {
   const promptUrl = core.getInput('prompt-url');
   const model = core.getInput('model') || 'gemini-3-flash-preview';
   const temperature = parseNumber(core.getInput('temperature') || '1.0', 1.0);
-  const maxLinkedItems = Math.max(0, Math.floor(parseNumber(core.getInput('max-linked-items') || '3', 3)));
+  const maxLinkedItems = Math.max(0, Math.floor(parseNumber(core.getInput('max-linked-items') || '5', 5)));
   const maxReferenceDepth = Math.max(0, Math.floor(parseNumber(core.getInput('max-reference-depth') || '2', 2)));
   const maxItemLength = Math.max(0, Math.floor(parseNumber(core.getInput('max-item-length') || '5000', 5000)));
 

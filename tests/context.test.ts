@@ -165,4 +165,81 @@ describe('buildReleaseContext', () => {
     expect(item?.body?.length).toBeLessThanOrEqual(20);
     expect(item?.body).toBeTruthy();
   });
+
+  it('applies max-linked-items per commit instead of globally', async () => {
+    const cfg: Config = {
+      owner: 'acme',
+      repo: 'widgets',
+      branch: 'main',
+      baseCommit: 'base1234',
+      headCommit: 'head5678',
+      token: 'token',
+      geminiApiKey: 'gemini-key',
+      promptUrl: 'https://example.com/prompt.txt',
+      model: 'gemini-3-flash-preview',
+      temperature: 1,
+      maxLinkedItems: 1,
+      maxReferenceDepth: 2,
+      maxItemLength: 5000,
+    };
+
+    const getIssueOrPullRequest = vi.fn().mockImplementation(async (_owner: string, _repo: string, number: number) => {
+      if (number === 40) {
+        return {
+          number: 40,
+          title: 'First linked item',
+          body: 'Body for #40',
+          url: 'https://github.com/acme/widgets/pull/40',
+          state: 'closed',
+          labels: [],
+          type: 'pull',
+          owner: 'acme',
+          repo: 'widgets',
+        };
+      }
+      return {
+        number: 57,
+        title: 'Second linked item',
+        body: 'Body for #57',
+        url: 'https://github.com/acme/widgets/pull/57',
+        state: 'closed',
+        labels: [],
+        type: 'pull',
+        owner: 'acme',
+        repo: 'widgets',
+      };
+    });
+
+    const gh = {
+      compareCommits: vi.fn().mockResolvedValue({
+        commits: [
+          {
+            sha: 'head5678',
+            message: 'Follow-up change (#57)',
+            url: 'https://github.com/acme/widgets/commit/head5678',
+            author: '@dev',
+            date: '2024-01-02T00:00:00Z',
+          },
+        ],
+        status: 'ahead',
+        totalCommits: 1,
+        files: [],
+      }),
+      getCommit: vi.fn().mockResolvedValue({
+        sha: 'base1234',
+        message: 'Initial change (#40)',
+        url: 'https://github.com/acme/widgets/commit/base1234',
+        author: '@dev',
+        date: '2024-01-01T00:00:00Z',
+      }),
+      getIssueOrPullRequest,
+    } as unknown as GitHubClient;
+
+    const context = await buildReleaseContext(cfg, gh);
+    const linkedIds = context.linkedItems.map(item => item.id);
+
+    expect(linkedIds).toContain('40');
+    expect(linkedIds).toContain('57');
+    expect(getIssueOrPullRequest).toHaveBeenCalledTimes(2);
+  });
 });

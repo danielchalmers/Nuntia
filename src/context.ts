@@ -7,6 +7,7 @@ type QueueEntry = {
   ref: Reference;
   depth: number;
   source: string;
+  rootCommitSha: string;
 };
 
 const MARKDOWN_COMMENT = /<!--[\s\S]*?-->/g;
@@ -145,7 +146,7 @@ export async function buildReleaseContext(cfg: Config, gh: GitHubClient): Promis
     commitEntries.push(commitInfo);
     const source = `commit:${commitInfo.sha.slice(0, 7)}`;
     for (const ref of refs) {
-      queue.push({ ref, depth: 1, source });
+      queue.push({ ref, depth: 1, source, rootCommitSha: commitInfo.sha });
     }
   }
 
@@ -154,10 +155,10 @@ export async function buildReleaseContext(cfg: Config, gh: GitHubClient): Promis
   }
 
   const linkedItems = new Map<string, LinkedItem>();
+  const linkedItemCountsByRoot = new Map<string, number>();
   let index = 0;
 
   while (index < queue.length) {
-    if (cfg.maxLinkedItems > 0 && linkedItems.size >= cfg.maxLinkedItems) break;
     const item = queue[index++];
     if (!item) break;
     if (item.depth > cfg.maxReferenceDepth) continue;
@@ -169,6 +170,11 @@ export async function buildReleaseContext(cfg: Config, gh: GitHubClient): Promis
       if (existing && !existing.referencedBy.includes(item.source)) {
         existing.referencedBy.push(item.source);
       }
+      continue;
+    }
+
+    const linkedCountForRoot = linkedItemCountsByRoot.get(item.rootCommitSha) ?? 0;
+    if (cfg.maxLinkedItems > 0 && linkedCountForRoot >= cfg.maxLinkedItems) {
       continue;
     }
 
@@ -195,10 +201,11 @@ export async function buildReleaseContext(cfg: Config, gh: GitHubClient): Promis
           .map(ref => normalizeCommitReference(ref, knownCommits));
         linkedCommit.references = summarizeReferences(refs);
         linkedItems.set(fullKey, linkedCommit);
+        linkedItemCountsByRoot.set(item.rootCommitSha, linkedCountForRoot + 1);
         if (item.depth < cfg.maxReferenceDepth) {
           const source = formatSource({ ...fullRef, id: commitDetails.sha });
           for (const ref of refs) {
-            queue.push({ ref, depth: item.depth + 1, source });
+            queue.push({ ref, depth: item.depth + 1, source, rootCommitSha: item.rootCommitSha });
           }
         }
       } else {
@@ -224,6 +231,7 @@ export async function buildReleaseContext(cfg: Config, gh: GitHubClient): Promis
           .map(ref => normalizeCommitReference(ref, knownCommits));
         linkedIssue.references = summarizeReferences(refs);
         linkedItems.set(resolvedKey, linkedIssue);
+        linkedItemCountsByRoot.set(item.rootCommitSha, linkedCountForRoot + 1);
         if (item.depth < cfg.maxReferenceDepth) {
           const source = formatSource({
             type: linkedIssue.type,
@@ -232,7 +240,7 @@ export async function buildReleaseContext(cfg: Config, gh: GitHubClient): Promis
             id: linkedIssue.id,
           });
           for (const ref of refs) {
-            queue.push({ ref, depth: item.depth + 1, source });
+            queue.push({ ref, depth: item.depth + 1, source, rootCommitSha: item.rootCommitSha });
           }
         }
       }
