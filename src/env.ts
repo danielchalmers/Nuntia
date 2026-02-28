@@ -79,12 +79,7 @@ export function getConfig(): Config {
   const temperature = parseNumber(core.getInput('temperature') || '1.0', 1.0);
   const maxLinkedItems = Math.max(0, Math.floor(parseNumber(core.getInput('max-linked-items') || '3', 3)));
   const maxReferenceDepth = Math.max(0, Math.floor(parseNumber(core.getInput('max-reference-depth') || '2', 2)));
-  const maxItemLengthInput = core.getInput('max-item-length');
-  const legacyMaxItemLengthInput = core.getInput('max-item-body-length');
-  const maxItemLength = Math.max(
-    0,
-    Math.floor(parseNumber(maxItemLengthInput || legacyMaxItemLengthInput || '5000', 5000))
-  );
+  const maxItemLength = Math.max(0, Math.floor(parseNumber(core.getInput('max-item-length') || '5000', 5000)));
 
   return {
     owner,
