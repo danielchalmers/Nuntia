@@ -39,4 +39,4 @@ Generate AI-authored release notes and migration guides from a commit range, on 
 
 ## License
 
-MIT
+[MIT](./LICENSE)
