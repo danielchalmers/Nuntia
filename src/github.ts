@@ -1,4 +1,6 @@
+import * as core from '@actions/core';
 import * as github from '@actions/github';
+import { throttling } from '@octokit/plugin-throttling';
 
 export type CommitDetails = {
   sha: string;
@@ -25,7 +27,23 @@ export class GitHubClient {
   private apiCallCount = 0;
 
   constructor(token: string, private owner: string, private repo: string) {
-    this.octokit = github.getOctokit(token);
+    // Register the throttling plugin so concurrent reference resolution backs off on GitHub's primary and secondary rate limits instead of failing the run.
+    this.octokit = github.getOctokit(
+      token,
+      {
+        throttle: {
+          onRateLimit: (retryAfter, options, _octokit, retryCount) => {
+            core.warning(`GitHub request quota exhausted for ${options.method} ${options.url}; retrying in ${retryAfter}s (attempt ${retryCount + 1}).`);
+            return retryCount < 3;
+          },
+          onSecondaryRateLimit: (retryAfter, options, _octokit, retryCount) => {
+            core.warning(`GitHub secondary rate limit hit for ${options.method} ${options.url}; retrying in ${retryAfter}s (attempt ${retryCount + 1}).`);
+            return retryCount < 3;
+          },
+        },
+      },
+      throttling
+    );
   }
 
   getApiCallCount(): number {

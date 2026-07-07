@@ -114,6 +114,31 @@ function applyItemTextLimit(
   return buildTitleBody(trimmedTitle, trimmedBody);
 }
 
+const REFERENCE_FETCH_CONCURRENCY = 8;
+
+type PendingFetch = { ref: Reference; key: string };
+type FetchOutcome = { key: string; commitDetails?: CommitDetails; details?: IssueOrPullDetails; error?: unknown };
+
+function addSource(item: LinkedItem, source: string): void {
+  if (!item.referencedBy.includes(source)) item.referencedBy.push(source);
+}
+
+// Run fn over items with at most `limit` in flight at once, preserving input order in the returned results.
+async function mapWithConcurrency<T, R>(items: T[], limit: number, fn: (item: T) => Promise<R>): Promise<R[]> {
+  const results: R[] = new Array(items.length);
+  let next = 0;
+  const worker = async (): Promise<void> => {
+    while (true) {
+      const i = next++;
+      if (i >= items.length) return;
+      results[i] = await fn(items[i]!);
+    }
+  };
+  const workers = Math.max(1, Math.min(limit, items.length));
+  await Promise.all(Array.from({ length: workers }, () => worker()));
+  return results;
+}
+
 export async function buildReleaseContext(cfg: Config, gh: GitHubClient): Promise<ReleaseContext> {
   const { commits: compareCommits, status, totalCommits, files, filesTruncated, commitsTruncated } = await gh.compareCommits(
     cfg.baseCommit,
@@ -147,97 +172,108 @@ export async function buildReleaseContext(cfg: Config, gh: GitHubClient): Promis
 
   const linkedItems = new Map<string, LinkedItem>();
   const linkedItemCountsByRoot = new Map<string, number>();
-  let index = 0;
 
-  while (index < queue.length) {
-    const item = queue[index++];
-    if (!item) break;
-    if (item.depth > cfg.maxReferenceDepth) continue;
+  // Resolve references breadth-first, one depth level per wave.
+  // Each wave fetches its unique references concurrently, then replays the resolution in frontier order so dedup, the per-root max-linked-items cap, depth handling, and referencedBy are identical to a sequential walk — only the network round-trips are parallelized.
+  let frontier: QueueEntry[] = queue;
+  let depth = 1;
+  while (frontier.length > 0 && depth <= cfg.maxReferenceDepth) {
+    // Phase 1: fetch each unique unresolved reference in this level once, concurrently. Roots already at the cap from a prior level are skipped here (that count is final) to avoid pointless fetches; the within-level cap is still enforced in Phase 2.
+    const toFetch: PendingFetch[] = [];
+    const seenFetchKeys = new Set<string>();
+    for (const item of frontier) {
+      if (cfg.maxLinkedItems > 0 && (linkedItemCountsByRoot.get(item.rootCommitSha) ?? 0) >= cfg.maxLinkedItems) continue;
+      const ref = normalizeCommitReference(item.ref, knownCommits);
+      const key = referenceKey(ref);
+      if (linkedItems.has(key)) continue;
+      if (ref.type === 'commit' && knownCommits.has(ref.id.toLowerCase())) continue;
+      if (seenFetchKeys.has(key)) continue;
+      seenFetchKeys.add(key);
+      toFetch.push({ ref, key });
+    }
 
-    const normalizedRef = normalizeCommitReference(item.ref, knownCommits);
-    const key = referenceKey(normalizedRef);
-    if (linkedItems.has(key)) {
-      const existing = linkedItems.get(key);
-      if (existing && !existing.referencedBy.includes(item.source)) {
-        existing.referencedBy.push(item.source);
+    const outcomeByKey = new Map<string, FetchOutcome>();
+    const outcomes = await mapWithConcurrency<PendingFetch, FetchOutcome>(toFetch, REFERENCE_FETCH_CONCURRENCY, async ({ ref, key }) => {
+      try {
+        if (ref.type === 'commit') {
+          return { key, commitDetails: await gh.getCommit(ref.owner, ref.repo, ref.id) };
+        }
+        return { key, details: await gh.getIssueOrPullRequest(ref.owner, ref.repo, Number(ref.id)) };
+      } catch (error) {
+        return { key, error };
       }
-      continue;
-    }
+    });
+    for (const outcome of outcomes) outcomeByKey.set(outcome.key, outcome);
 
-    const linkedCountForRoot = linkedItemCountsByRoot.get(item.rootCommitSha) ?? 0;
-    if (cfg.maxLinkedItems > 0 && linkedCountForRoot >= cfg.maxLinkedItems) {
-      continue;
-    }
+    // Phase 2: replay resolution in frontier order using the pre-fetched outcomes. This mirrors the sequential walk exactly; the per-root cap is counted only on a genuine new addition.
+    const nextFrontier: QueueEntry[] = [];
+    for (const item of frontier) {
+      const ref = normalizeCommitReference(item.ref, knownCommits);
+      const key = referenceKey(ref);
+      const existing = linkedItems.get(key);
+      if (existing) {
+        addSource(existing, item.source);
+        continue;
+      }
+      if (ref.type === 'commit' && knownCommits.has(ref.id.toLowerCase())) continue;
+      const rootCount = linkedItemCountsByRoot.get(item.rootCommitSha) ?? 0;
+      if (cfg.maxLinkedItems > 0 && rootCount >= cfg.maxLinkedItems) continue;
+      const outcome = outcomeByKey.get(key);
+      if (!outcome || outcome.error) {
+        if (outcome?.error) core.warning(`Failed to resolve reference ${key}: ${getErrorMessage(outcome.error)}`);
+        continue;
+      }
 
-    try {
-      if (normalizedRef.type === 'commit') {
-        if (knownCommits.has(normalizedRef.id.toLowerCase())) continue;
-        const commitDetails = await gh.getCommit(normalizedRef.owner, normalizedRef.repo, normalizedRef.id);
-        const fullRef: Reference = {
-          ...normalizedRef,
-          id: commitDetails.sha.toLowerCase(),
-        };
-        const fullKey = referenceKey(fullRef);
-        if (linkedItems.has(fullKey)) {
-          const existing = linkedItems.get(fullKey);
-          if (existing && !existing.referencedBy.includes(item.source)) {
-            existing.referencedBy.push(item.source);
-          }
+      if (outcome.commitDetails) {
+        const commitDetails = outcome.commitDetails;
+        const fullSha = commitDetails.sha.toLowerCase();
+        const fullKey = referenceKey({ ...ref, id: fullSha });
+        const existingFull = linkedItems.get(fullKey);
+        if (existingFull) {
+          addSource(existingFull, item.source);
           continue;
         }
-        knownCommits.add(commitDetails.sha.toLowerCase());
+        if (knownCommits.has(fullSha)) continue;
+        knownCommits.add(fullSha);
         const cleanedMessage = sanitizeCommitMessage(commitDetails.message);
-        const linkedCommit = toLinkedCommit(commitDetails, normalizedRef.owner, normalizedRef.repo, item.source, cleanedMessage);
-        const refs = extractReferences(cleanedMessage, normalizedRef.owner, normalizedRef.repo)
-          .map(ref => normalizeCommitReference(ref, knownCommits));
+        const linkedCommit = toLinkedCommit(commitDetails, ref.owner, ref.repo, item.source, cleanedMessage);
+        const refs = extractReferences(cleanedMessage, ref.owner, ref.repo).map(r => normalizeCommitReference(r, knownCommits));
         linkedCommit.references = summarizeReferences(refs);
         linkedItems.set(fullKey, linkedCommit);
-        linkedItemCountsByRoot.set(item.rootCommitSha, linkedCountForRoot + 1);
-        if (item.depth < cfg.maxReferenceDepth) {
-          const source = formatSource({ ...fullRef, id: commitDetails.sha });
-          for (const ref of refs) {
-            queue.push({ ref, depth: item.depth + 1, source, rootCommitSha: item.rootCommitSha });
-          }
+        linkedItemCountsByRoot.set(item.rootCommitSha, rootCount + 1);
+        if (depth < cfg.maxReferenceDepth) {
+          const source = formatSource({ ...ref, id: commitDetails.sha });
+          for (const r of refs) nextFrontier.push({ ref: r, depth: depth + 1, source, rootCommitSha: item.rootCommitSha });
         }
-      } else {
-        const details = await gh.getIssueOrPullRequest(normalizedRef.owner, normalizedRef.repo, Number(normalizedRef.id));
-        const resolvedRef: Reference = {
-          type: details.type,
-          owner: details.owner,
-          repo: details.repo,
-          id: String(details.number),
-        };
+        continue;
+      }
+
+      if (outcome.details) {
+        const details = outcome.details;
+        const resolvedRef: Reference = { type: details.type, owner: details.owner, repo: details.repo, id: String(details.number) };
         const resolvedKey = referenceKey(resolvedRef);
-        if (linkedItems.has(resolvedKey)) {
-          const existing = linkedItems.get(resolvedKey);
-          if (existing && !existing.referencedBy.includes(item.source)) {
-            existing.referencedBy.push(item.source);
-          }
+        const existingResolved = linkedItems.get(resolvedKey);
+        if (existingResolved) {
+          addSource(existingResolved, item.source);
           continue;
         }
         const cleanedTitle = sanitizeLinkedText(details.title || '');
         const cleanedBody = sanitizeLinkedText(details.body || '');
         const linkedIssue = toLinkedIssue(details, item.source, cleanedTitle, cleanedBody);
-        const refs = extractReferences(`${cleanedTitle}\n\n${cleanedBody}`, normalizedRef.owner, normalizedRef.repo)
-          .map(ref => normalizeCommitReference(ref, knownCommits));
+        const refs = extractReferences(`${cleanedTitle}\n\n${cleanedBody}`, ref.owner, ref.repo).map(r => normalizeCommitReference(r, knownCommits));
         linkedIssue.references = summarizeReferences(refs);
         linkedItems.set(resolvedKey, linkedIssue);
-        linkedItemCountsByRoot.set(item.rootCommitSha, linkedCountForRoot + 1);
-        if (item.depth < cfg.maxReferenceDepth) {
-          const source = formatSource({
-            type: linkedIssue.type,
-            owner: normalizedRef.owner,
-            repo: normalizedRef.repo,
-            id: linkedIssue.id,
-          });
-          for (const ref of refs) {
-            queue.push({ ref, depth: item.depth + 1, source, rootCommitSha: item.rootCommitSha });
-          }
+        linkedItemCountsByRoot.set(item.rootCommitSha, rootCount + 1);
+        if (depth < cfg.maxReferenceDepth) {
+          const source = formatSource({ type: linkedIssue.type, owner: ref.owner, repo: ref.repo, id: linkedIssue.id });
+          for (const r of refs) nextFrontier.push({ ref: r, depth: depth + 1, source, rootCommitSha: item.rootCommitSha });
         }
+        continue;
       }
-    } catch (error) {
-      console.warn(`⚠️ Failed to resolve reference ${key}: ${getErrorMessage(error)}`);
     }
+
+    frontier = nextFrontier;
+    depth++;
   }
 
   // Authoritative base-inclusive commit count for the range. compareCommits' total_commits is base-exclusive, so add one for the base commit itself.
