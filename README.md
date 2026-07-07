@@ -7,7 +7,7 @@ Generate AI-authored release notes and migration guides from a commit range, on 
 - Accepts a base commit, head commit, and branch, then resolves the inclusive commit range.
 - Scrapes commit messages and follows linked issues/PRs/commits (with configurable depth).
 - Sends the aggregated context to Gemini using your prompt URL.
-- Writes release notes to a markdown file and uploads it as a workflow artifact.
+- Writes release notes (plus payload/context debug files) to the `artifacts/` directory for your workflow to upload.
 
 ## Quick setup
 

@@ -28,22 +28,6 @@ jobs:
         run: npm run build
       - name: Verify dist/ is up to date
         run: npm run check:dist
-      - name: Diagnose dist drift
-        if: failure()
-        run: |
-          git show HEAD:dist/index.js > "$RUNNER_TEMP/committed.js"
-          node -e '
-            const fs=require("fs");
-            const a=fs.readFileSync(process.env.RUNNER_TEMP+"/committed.js");
-            const b=fs.readFileSync("dist/index.js");
-            console.log("committed",a.length,"fresh",b.length,"delta",b.length-a.length);
-            const n=Math.min(a.length,b.length); let i=0;
-            while(i<n && a[i]===b[i]) i++;
-            console.log("first diff at byte",i);
-            const s=Math.max(0,i-160),e=i+160;
-            console.log("COMMITTED:",JSON.stringify(a.slice(s,e).toString("latin1")));
-            console.log("FRESH    :",JSON.stringify(b.slice(s,e).toString("latin1")));
-          '
       - name: Mock release notes
         uses: ./
         with:

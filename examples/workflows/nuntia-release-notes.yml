@@ -47,5 +47,5 @@ jobs:
         uses: actions/upload-artifact@v6
         with:
           name: nuntia-release-notes-${{ github.run_number }}
-          path: ${{ steps.nuntia.outputs.release-notes-path }}
+          path: artifacts
           if-no-files-found: error

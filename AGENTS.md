@@ -184,11 +184,16 @@ The action is defined in `action.yml` and runs from `dist/index.js`. Key points:
 
 ## File Artifacts
 
-The action generates artifacts during execution:
+The action writes these files to the `artifacts/` directory during execution:
 
 - `artifacts/nuntia-release-notes.md` - Generated release notes output
+- `artifacts/nuntia-payload.json` - Full Gemini request payload (debug)
+- `artifacts/nuntia-context.json` - Resolved release context (debug)
 
-These are uploaded as workflow artifacts by the action itself.
+The action does not upload them itself (that would require bundling
+`@actions/artifact`, whose transitive Azure SDK is not byte-reproducible across
+OSes and breaks the dist check). Upload them from your workflow with
+`actions/upload-artifact` and `path: artifacts`.
 
 ## Troubleshooting
 
