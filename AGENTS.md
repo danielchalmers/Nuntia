@@ -121,18 +121,14 @@ git add dist/
 git commit -m "Build: Update dist folder"
 ```
 
-The CI workflow (`ci.yml`) rebuilds `dist/` on Node.js 24 (matching the action
-runtime) and fails if the committed output drifts from a fresh build:
+The CI workflow (`ci.yml`) rebuilds `dist/` on Node.js 24 (matching the action runtime) and fails if the committed output drifts from a fresh build:
 
 ```bash
 npm run build
 npm run check:dist   # exits non-zero if git sees any change under dist/
 ```
 
-If you forget to rebuild dist after changing source code, the CI will fail.
-The bundle is byte-reproducible across Windows and Linux only because
-`src/storage.ts` routes `process.cwd()` through a helper (so ncc does not
-relocate the artifacts path on Windows) and `.gitattributes` pins line endings.
+If you forget to rebuild dist after changing source code, the CI will fail. The bundle is byte-reproducible across Windows and Linux only because `src/storage.ts` routes `process.cwd()` through a helper (so ncc does not relocate the artifacts path on Windows) and `.gitattributes` pins line endings.
 
 ## Pre-commit Checklist
 
@@ -190,10 +186,7 @@ The action writes these files to the `artifacts/` directory during execution:
 - `artifacts/nuntia-payload.json` - Full Gemini request payload (debug)
 - `artifacts/nuntia-context.json` - Resolved release context (debug)
 
-The action does not upload them itself (that would require bundling
-`@actions/artifact`, whose transitive Azure SDK is not byte-reproducible across
-OSes and breaks the dist check). Upload them from your workflow with
-`actions/upload-artifact` and `path: artifacts`.
+The action does not upload them itself (that would require bundling `@actions/artifact`, whose transitive Azure SDK is not byte-reproducible across OSes and breaks the dist check). Upload them from your workflow with `actions/upload-artifact` and `path: artifacts`.
 
 ## Troubleshooting
 

@@ -1,6 +1,5 @@
-// Fails if the committed dist/ bundle does not match a fresh build, so stale
-// compiled output can't ship to consumers pinning @v1 / @main. Runs locally
-// (npm run check:dist) and in CI after `npm run build`.
+// Fails if the committed dist/ bundle does not match a fresh build, so stale compiled output can't ship to consumers pinning @v1 / @main.
+// Runs locally (npm run check:dist) and in CI after `npm run build`.
 const { execFileSync } = require("node:child_process");
 
 const status = execFileSync("git", ["status", "--porcelain", "--", "dist"], {
