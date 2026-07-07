@@ -23,7 +23,7 @@ Generate AI-authored release notes and migration guides from a commit range, on 
 | `head-commit` | End commit SHA (inclusive). | - |
 | `branch` | Branch name (`branch` or `owner/repo@branch`). | - |
 | `prompt-url` | URL to raw prompt template content. | Required |
-| `model` | Gemini model identifier. | `gemini-3-flash-preview` |
+| `model` | Gemini model identifier. | `gemini-3.5-flash` |
 | `temperature` | Model temperature (`0` deterministic → `2` exploratory). | `1.0` |
 | `max-linked-items` | Maximum linked issues/PRs/commits to fetch. | `5` |
 | `max-reference-depth` | Depth to follow references inside linked descriptions. | `2` |
