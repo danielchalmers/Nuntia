@@ -105,11 +105,11 @@ npm run build
 This command performs the following steps:
 
 1. **Type-checking** (`npm run typecheck`) - Validates TypeScript code
-2. **Clean** (`rimraf dist`) - Removes existing dist folder
-3. **Bundle** (`ncc build`) - Compiles and bundles TypeScript to a single JavaScript file
+2. **Clean** (`npm run clean`) - Removes the existing dist folder
+3. **Bundle** (`esbuild`) - Bundles TypeScript into a single `dist/index.js`
    - Minifies the output
-   - Generates source maps
-   - Includes license information in `licenses.txt`
+   - Appends third-party license notices to the end of the file
+   - Emits one file only (no code-split chunks or source map)
 
 #### Important: Commit dist Changes
 
@@ -128,7 +128,7 @@ npm run build
 npm run check:dist   # exits non-zero if git sees any change under dist/
 ```
 
-If you forget to rebuild dist after changing source code, the CI will fail. The bundle is byte-reproducible across Windows and Linux only because `src/storage.ts` routes `process.cwd()` through a helper (so ncc does not relocate the artifacts path on Windows) and `.gitattributes` pins line endings.
+If you forget to rebuild dist after changing source code, the CI will fail. esbuild produces byte-identical output across Windows and Linux (and `.gitattributes` pins line endings), so the committed bundle a developer builds locally matches the Linux CI rebuild.
 
 ## Pre-commit Checklist
 
