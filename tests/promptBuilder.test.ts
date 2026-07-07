@@ -17,7 +17,7 @@ describe('buildPrompt', () => {
       maxItemLength: 5000,
     },
     repository: { owner: 'acme', repo: 'widgets', branch: 'main' },
-    range: { base: 'a1b2c3d', head: 'd4e5f6g', totalCommits: 1, processedCommits: 1, truncated: false, changedFiles: [] },
+    range: { base: 'a1b2c3d', head: 'd4e5f6g', totalCommits: 1, changedFiles: [] },
     commits: [],
     linkedItems: [],
   };

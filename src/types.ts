@@ -76,10 +76,7 @@ export type ReleaseContext = {
     head: string;
     status?: string;
     totalCommits: number;
-    processedCommits: number;
-    truncated: boolean;
     changedFiles: string[];
-    changedFilesTruncated?: boolean;
   };
   commits: CommitInfo[];
   linkedItems: LinkedItem[];

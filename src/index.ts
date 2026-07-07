@@ -24,7 +24,7 @@ async function run(): Promise<void> {
   });
 
   const context = await buildReleaseContext(cfg, gh);
-  console.log(`Commit range resolved: ${context.range.processedCommits}/${context.range.totalCommits} commit(s), ${context.linkedItems.length} linked item(s).`);
+  console.log(`Commit range resolved: ${context.range.totalCommits} commit(s), ${context.linkedItems.length} linked item(s).`);
 
   const promptText = await fetchPrompt(cfg.promptUrl);
   const { systemPrompt, userPrompt } = buildPrompt(context, promptText);
@@ -45,7 +45,6 @@ async function run(): Promise<void> {
   core.setOutput('release-notes-path', outputPath);
   core.setOutput('input-tokens', String(inputTokens));
   core.setOutput('output-tokens', String(outputTokens));
-  core.setOutput('truncated', String(context.range.truncated));
 }
 
 run().catch(err => {

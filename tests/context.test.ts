@@ -243,7 +243,7 @@ describe('buildReleaseContext', () => {
     expect(getIssueOrPullRequest).toHaveBeenCalledTimes(2);
   });
 
-  it('flags the range as truncated and warns when fewer commits are processed than the total', async () => {
+  it('throws instead of producing notes when the commit range is incomplete', async () => {
     const cfg: Config = {
       owner: 'acme',
       repo: 'widgets',
@@ -280,14 +280,10 @@ describe('buildReleaseContext', () => {
       getIssueOrPullRequest: vi.fn(),
     } as unknown as GitHubClient;
 
-    const context = await buildReleaseContext(cfg, gh);
-
-    expect(context.range.totalCommits).toBe(301); // 300 range commits + base
-    expect(context.range.processedCommits).toBe(1);
-    expect(context.range.truncated).toBe(true);
+    await expect(buildReleaseContext(cfg, gh)).rejects.toThrow(/incomplete/i);
   });
 
-  it('honors the commitsTruncated signal even when the processed count matches the total', async () => {
+  it('throws when the recovery is unverified even if the counts match', async () => {
     const cfg: Config = {
       owner: 'acme', repo: 'widgets', branch: 'main',
       baseCommit: 'base1', headCommit: 'head1',
@@ -320,16 +316,12 @@ describe('buildReleaseContext', () => {
       getIssueOrPullRequest: vi.fn(),
     } as unknown as GitHubClient;
 
-    const context = await buildReleaseContext(cfg, gh);
-
     // base + 300 range commits = 301 == authoritative total, but the client signalled
-    // the recovery was unconfirmed, so the range must still be reported as truncated.
-    expect(context.range.processedCommits).toBe(301);
-    expect(context.range.totalCommits).toBe(301);
-    expect(context.range.truncated).toBe(true);
+    // the recovery was unconfirmed, so it must still abort rather than lie.
+    await expect(buildReleaseContext(cfg, gh)).rejects.toThrow(/incomplete/i);
   });
 
-  it('flags changedFilesTruncated when the compare file list is capped', async () => {
+  it('does not throw on a capped changed-file list (files are non-fatal)', async () => {
     const cfg: Config = {
       owner: 'acme', repo: 'widgets', branch: 'main',
       baseCommit: 'base1', headCommit: 'head1',
@@ -354,9 +346,9 @@ describe('buildReleaseContext', () => {
       getIssueOrPullRequest: vi.fn(),
     } as unknown as GitHubClient;
 
+    // The commit range is complete, so a capped file list must not abort the run.
     const context = await buildReleaseContext(cfg, gh);
-
-    expect(context.range.changedFilesTruncated).toBe(true);
-    expect(context.range.truncated).toBe(false); // the commit range itself is complete
+    expect(context.range.totalCommits).toBe(2); // base + 1 range commit
+    expect(context.range.changedFiles).toEqual(['a.ts', 'b.ts']);
   });
 });

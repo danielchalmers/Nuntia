@@ -247,18 +247,22 @@ export async function buildReleaseContext(cfg: Config, gh: GitHubClient): Promis
       ? 1
       : (typeof totalCommits === 'number' ? totalCommits : compareCommits.length) + 1;
   const processedCommits = commitEntries.length;
-  // Trust the client's completeness signal (which knows whether the >250 recovery
-  // actually reached the merge-base) in addition to the raw count check.
-  const truncated = commitsTruncated || processedCommits < authoritativeTotal;
 
-  if (truncated) {
-    core.warning(
-      `Release range may be incomplete: ${processedCommits} of ${authoritativeTotal} commit(s) in ${cfg.baseCommit}..${cfg.headCommit} were included and full completeness could not be verified. Some changes may be missing from the generated notes.`
+  // A release-notes tool must never publish an incomplete changelog. GitHub's
+  // compare API caps at 250 commits; when the full range can't be verifiably
+  // recovered (commitsTruncated reflects whether the >250 recovery actually
+  // reached the merge-base), fail instead of generating notes over a partial set.
+  if (commitsTruncated || processedCommits < authoritativeTotal) {
+    throw new Error(
+      `Commit range ${cfg.baseCommit}..${cfg.headCommit} is incomplete: recovered ${processedCommits} of ${authoritativeTotal} commit(s). GitHub's compare API caps at 250 commits and the full range could not be verifiably recovered (this can happen with non-linear history). Aborting so incomplete release notes are not published.`
     );
   }
+
+  // The changed-file list is secondary context (notes are driven by commits/PRs),
+  // so a capped list is a non-fatal warning rather than a hard failure.
   if (filesTruncated) {
     core.warning(
-      `Changed-file list hit GitHub's 300-file compare cap; some changed files are omitted from the release context.`
+      `Changed-file list hit GitHub's 300-file compare cap; the release context includes only a partial file list. Commit and pull-request content is complete.`
     );
   }
 
@@ -266,15 +270,10 @@ export async function buildReleaseContext(cfg: Config, gh: GitHubClient): Promis
     base: cfg.baseCommit,
     head: cfg.headCommit,
     totalCommits: authoritativeTotal,
-    processedCommits,
-    truncated,
     changedFiles: files,
   };
   if (status !== undefined) {
     range.status = status;
-  }
-  if (filesTruncated) {
-    range.changedFilesTruncated = true;
   }
 
   const maxItemLength = cfg.maxItemLength;
