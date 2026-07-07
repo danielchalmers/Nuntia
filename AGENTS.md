@@ -121,11 +121,13 @@ git add dist/
 git commit -m "Build: Update dist folder"
 ```
 
-The CI workflow (`ci.yml`) verifies that the dist folder is up to date:
+The CI workflow (`ci.yml`) rebuilds `dist/` and fails if the committed
+output drifts from a fresh build (the "Verify dist/ is up to date" step):
 
 ```bash
-git status --porcelain
-git diff --exit-code --name-only
+npm run build
+# CI fails the run if this reports anything:
+git status --porcelain -- dist
 ```
 
 If you forget to rebuild dist after changing source code, the CI will fail.
