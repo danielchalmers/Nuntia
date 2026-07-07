@@ -1,3 +1,7 @@
 * text=auto eol=lf
 
+# Generated single-line source maps: don't apply line-ending conversion
+*.map -text
+
+# Generated bundle: collapse in diffs and exclude from language stats
 dist/** -diff linguist-generated=true
