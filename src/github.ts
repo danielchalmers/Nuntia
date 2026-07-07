@@ -102,8 +102,7 @@ export class GitHubClient {
       if (totalCommits === undefined && typeof data?.total_commits === 'number') {
         totalCommits = data.total_commits;
       }
-      // total_commits counts commits from the merge-base to head, so the merge-base
-      // sha is the correct stop point when recovering the range past the 250 cap.
+      // total_commits counts commits from the merge-base to head, so the merge-base sha is the correct stop point when recovering the range past the 250 cap.
       if (mergeBaseSha === undefined) {
         const mb = (data as any)?.merge_base_commit?.sha ?? (data as any)?.base_commit?.sha;
         if (typeof mb === 'string') mergeBaseSha = mb;
@@ -135,8 +134,7 @@ export class GitHubClient {
     }
 
     // GitHub's compare endpoint hard-caps at 250 commits regardless of pagination.
-    // When the range is larger, recover the full merge-base..head set via the
-    // (uncapped) list-commits endpoint so large releases aren't silently truncated.
+    // When the range is larger, recover the full merge-base..head set via the (uncapped) list-commits endpoint so large releases aren't silently truncated.
     let rangeCommits = commits;
     let commitsTruncated = false;
     if (typeof totalCommits === 'number') {
@@ -152,13 +150,10 @@ export class GitHubClient {
         }
         if (stopSha) {
           const { commits: recovered, reachedBase } = await this.listCommitRange(head, stopSha, totalCommits);
-          // Only trust the recovery when the walk actually reached the merge-base
-          // AND collected exactly total_commits; otherwise the history is non-linear
-          // and the set is an unverified approximation that must be flagged (never
-          // silently trusted). Compute this from the RAW walk before any trimming.
+          // Only trust the recovery when the walk actually reached the merge-base AND collected exactly total_commits; otherwise the history is non-linear and the set is an unverified approximation that must be flagged, never silently trusted.
+          // Compute this from the raw walk before any trimming.
           commitsTruncated = !(reachedBase && recovered.length === totalCommits);
-          // Keep at most the newest total_commits commits (recovered is oldest-first)
-          // so an overshoot doesn't report more commits than the range contains.
+          // Keep at most the newest total_commits commits (recovered is oldest-first) so an overshoot doesn't report more commits than the range contains.
           rangeCommits =
             recovered.length > totalCommits ? recovered.slice(recovered.length - totalCommits) : recovered;
         } else {
@@ -166,8 +161,7 @@ export class GitHubClient {
         }
       }
     } else if (commits.length >= 250) {
-      // total_commits is missing but we collected a full cap's worth, so the set
-      // may be capped without a way to confirm completeness.
+      // total_commits is missing but we collected a full cap's worth, so the set may be capped without a way to confirm completeness.
       commitsTruncated = true;
     }
 
@@ -197,12 +191,9 @@ export class GitHubClient {
   }
 
   /**
-   * List the commits in mergeBase..head (base-exclusive), oldest-first, using the
-   * list-commits endpoint which — unlike compare — is not capped at 250.
+   * List the commits in mergeBase..head (base-exclusive), oldest-first, using the list-commits endpoint which — unlike compare — is not capped at 250.
    * Walks history newest-first from head until it reaches the merge-base commit.
-   * `reachedBase` reports whether the walk actually terminated at the merge-base:
-   * when false, the returned set stopped on the scan bound and may be incomplete,
-   * so callers must treat it as unconfirmed rather than authoritative.
+   * `reachedBase` reports whether the walk actually terminated at the merge-base; when false, the returned set stopped on the scan bound and may be incomplete, so callers must treat it as unconfirmed rather than authoritative.
    */
   async listCommitRange(
     head: string,
@@ -214,9 +205,7 @@ export class GitHubClient {
     const collected: CommitDetails[] = [];
     const seen = new Set<string>();
     const baseLower = baseSha.toLowerCase();
-    // Scan a little past the expected count so the merge-base can be observed for a
-    // linear range (where it sits at index expectedTotal); bound the walk so a
-    // base that is not an ancestor of head can't run away through all of history.
+    // Scan a little past the expected count so the merge-base can be observed for a linear range (where it sits at index expectedTotal); bound the walk so a base that is not an ancestor of head can't run away through all of history.
     const scanLimit =
       typeof expectedTotal === 'number' && expectedTotal > 0
         ? expectedTotal + perPage
@@ -252,10 +241,8 @@ export class GitHubClient {
       page++;
     }
 
-    // list-commits returns newest-first; compare returns oldest-first, so reverse
-    // to keep the rest of the pipeline order-consistent. Trimming an oversized
-    // (superset) walk is left to the caller so it can decide completeness from the
-    // raw walk BEFORE any trim masks a mismatch.
+    // list-commits returns newest-first; compare returns oldest-first, so reverse to keep the rest of the pipeline order-consistent.
+    // Trimming an oversized (superset) walk is left to the caller so it can decide completeness from the raw walk before any trim masks a mismatch.
     collected.reverse();
     return { commits: collected, reachedBase };
   }

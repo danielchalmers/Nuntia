@@ -240,26 +240,22 @@ export async function buildReleaseContext(cfg: Config, gh: GitHubClient): Promis
     }
   }
 
-  // Authoritative base-inclusive commit count for the range. compareCommits'
-  // total_commits is base-exclusive, so add one for the base commit itself.
+  // Authoritative base-inclusive commit count for the range. compareCommits' total_commits is base-exclusive, so add one for the base commit itself.
   const authoritativeTotal =
     cfg.baseCommit === cfg.headCommit
       ? 1
       : (typeof totalCommits === 'number' ? totalCommits : compareCommits.length) + 1;
   const processedCommits = commitEntries.length;
 
-  // A release-notes tool must never publish an incomplete changelog. GitHub's
-  // compare API caps at 250 commits; when the full range can't be verifiably
-  // recovered (commitsTruncated reflects whether the >250 recovery actually
-  // reached the merge-base), fail instead of generating notes over a partial set.
+  // A release-notes tool must never publish an incomplete changelog.
+  // GitHub's compare API caps at 250 commits; when the full range can't be verifiably recovered (commitsTruncated reflects whether the >250 recovery actually reached the merge-base), fail instead of generating notes over a partial set.
   if (commitsTruncated || processedCommits < authoritativeTotal) {
     throw new Error(
       `Commit range ${cfg.baseCommit}..${cfg.headCommit} is incomplete: recovered ${processedCommits} of ${authoritativeTotal} commit(s). GitHub's compare API caps at 250 commits and the full range could not be verifiably recovered (this can happen with non-linear history). Aborting so incomplete release notes are not published.`
     );
   }
 
-  // The changed-file list is secondary context (notes are driven by commits/PRs),
-  // so a capped list is a non-fatal warning rather than a hard failure.
+  // The changed-file list is secondary context (notes are driven by commits/PRs), so a capped list is a non-fatal warning rather than a hard failure.
   if (filesTruncated) {
     core.warning(
       `Changed-file list hit GitHub's 300-file compare cap; the release context includes only a partial file list. Commit and pull-request content is complete.`
