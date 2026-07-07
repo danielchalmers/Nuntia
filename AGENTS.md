@@ -121,16 +121,18 @@ git add dist/
 git commit -m "Build: Update dist folder"
 ```
 
-The CI workflow (`ci.yml`) rebuilds `dist/` and fails if the committed
-output drifts from a fresh build (the "Verify dist/ is up to date" step):
+The CI workflow (`ci.yml`) rebuilds `dist/` on Node.js 24 (matching the action
+runtime) and fails if the committed output drifts from a fresh build:
 
 ```bash
 npm run build
-# CI fails the run if this reports anything:
-git status --porcelain -- dist
+npm run check:dist   # exits non-zero if git sees any change under dist/
 ```
 
 If you forget to rebuild dist after changing source code, the CI will fail.
+The bundle is byte-reproducible across Windows and Linux only because
+`src/storage.ts` routes `process.cwd()` through a helper (so ncc does not
+relocate the artifacts path on Windows) and `.gitattributes` pins line endings.
 
 ## Pre-commit Checklist
 

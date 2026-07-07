@@ -27,16 +27,7 @@ jobs:
       - name: Build
         run: npm run build
       - name: Verify dist/ is up to date
-        run: |
-          if [ -n "$(git status --porcelain -- dist)" ]; then
-            echo "::error title=dist is out of date::The committed dist/ does not match a fresh build. Run 'npm run build' and commit the changes in dist/."
-            echo "Drifted paths:"
-            git status --porcelain -- dist
-            echo "Diff:"
-            git --no-pager diff -- dist
-            exit 1
-          fi
-          echo "dist/ is in sync with src/."
+        run: npm run check:dist
       - name: Mock release notes
         uses: ./
         with:

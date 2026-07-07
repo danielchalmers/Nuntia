@@ -8,9 +8,11 @@
     "build": "npm run typecheck && rimraf dist && ncc build src/index.ts -o dist --minify --source-map --license licenses.txt",
     "clean": "rimraf dist",
     "typecheck": "tsc --noEmit",
+    "check:dist": "node scripts/check-dist.cjs",
     "dev": "tsc -w",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "verify": "npm run typecheck && npm test && npm run build && npm run check:dist"
   },
   "keywords": [
     "github-actions",
