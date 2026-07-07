@@ -42,6 +42,7 @@
   "dependencies": {
     "@actions/core": "^3.0.1",
     "@actions/github": "^9.1.1",
-    "@google/genai": "^2.10.0"
+    "@google/genai": "^2.10.0",
+    "@octokit/plugin-throttling": "^11.0.3"
   }
 }
