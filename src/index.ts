@@ -24,7 +24,7 @@ async function run(): Promise<void> {
   });
 
   const context = await buildReleaseContext(cfg, gh);
-  console.log(`Commit range resolved: ${context.commits.length} commit(s), ${context.linkedItems.length} linked item(s).`);
+  console.log(`Commit range resolved: ${context.range.totalCommits} commit(s), ${context.linkedItems.length} linked item(s).`);
 
   const promptText = await fetchPrompt(cfg.promptUrl);
   const { systemPrompt, userPrompt } = buildPrompt(context, promptText);

@@ -1,3 +1,4 @@
+import * as core from '@actions/core';
 import type { CommitInfo, Config, LinkedItem, Reference, ReleaseContext } from './types';
 import { extractReferences, referenceKey, summarizeReferences } from './references';
 import type { CommitDetails, IssueOrPullDetails } from './github';
@@ -114,7 +115,7 @@ function applyItemTextLimit(
 }
 
 export async function buildReleaseContext(cfg: Config, gh: GitHubClient): Promise<ReleaseContext> {
-  const { commits: compareCommits, status, totalCommits, files } = await gh.compareCommits(
+  const { commits: compareCommits, status, totalCommits, files, filesTruncated, commitsTruncated } = await gh.compareCommits(
     cfg.baseCommit,
     cfg.headCommit
   );
@@ -142,10 +143,6 @@ export async function buildReleaseContext(cfg: Config, gh: GitHubClient): Promis
     for (const ref of refs) {
       queue.push({ ref, depth: 1, source, rootCommitSha: commitInfo.sha });
     }
-  }
-
-  if (typeof totalCommits === 'number' && totalCommits + 1 > commits.length) {
-    console.warn(`⚠️ Compare API returned ${commits.length} commit(s), but total_commits is ${totalCommits}.`);
   }
 
   const linkedItems = new Map<string, LinkedItem>();
@@ -243,10 +240,32 @@ export async function buildReleaseContext(cfg: Config, gh: GitHubClient): Promis
     }
   }
 
+  // Authoritative base-inclusive commit count for the range. compareCommits' total_commits is base-exclusive, so add one for the base commit itself.
+  const authoritativeTotal =
+    cfg.baseCommit === cfg.headCommit
+      ? 1
+      : (typeof totalCommits === 'number' ? totalCommits : compareCommits.length) + 1;
+  const processedCommits = commitEntries.length;
+
+  // A release-notes tool must never publish an incomplete changelog.
+  // GitHub's compare API caps at 250 commits; when the full range can't be verifiably recovered (commitsTruncated reflects whether the >250 recovery actually reached the merge-base), fail instead of generating notes over a partial set.
+  if (commitsTruncated || processedCommits < authoritativeTotal) {
+    throw new Error(
+      `Commit range ${cfg.baseCommit}..${cfg.headCommit} is incomplete: recovered ${processedCommits} of ${authoritativeTotal} commit(s). GitHub's compare API caps at 250 commits and the full range could not be verifiably recovered (this can happen with non-linear history). Aborting so incomplete release notes are not published.`
+    );
+  }
+
+  // The changed-file list is secondary context (notes are driven by commits/PRs), so a capped list is a non-fatal warning rather than a hard failure.
+  if (filesTruncated) {
+    core.warning(
+      `Changed-file list hit GitHub's 300-file compare cap; the release context includes only a partial file list. Commit and pull-request content is complete.`
+    );
+  }
+
   const range: ReleaseContext['range'] = {
     base: cfg.baseCommit,
     head: cfg.headCommit,
-    totalCommits: commitEntries.length,
+    totalCommits: authoritativeTotal,
     changedFiles: files,
   };
   if (status !== undefined) {
