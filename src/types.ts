@@ -8,7 +8,6 @@ export type Config = {
   geminiApiKey: string;
   promptUrl: string;
   model: string;
-  temperature: number;
   maxLinkedItems: number;
   maxReferenceDepth: number;
   maxItemLength: number;
@@ -61,7 +60,6 @@ export type ReleaseContext = {
     branch: string;
     promptUrl: string;
     model: string;
-    temperature: number;
     maxLinkedItems: number;
     maxReferenceDepth: number;
     maxItemLength: number;

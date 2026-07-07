@@ -3,12 +3,11 @@ import { GenerateContentResponse, GoogleGenAI, type GenerateContentParameters } 
 export function buildTextPayload(
   systemPrompt: string,
   userPrompt: string,
-  model: string,
-  temperature: number
+  model: string
 ): GenerateContentParameters {
+  // No temperature is set: Gemini 3 models are tuned for their default and can degrade when it is overridden, so we let the API use the model default.
   const config: NonNullable<GenerateContentParameters['config']> = {
     systemInstruction: systemPrompt,
-    temperature,
   };
 
   return {

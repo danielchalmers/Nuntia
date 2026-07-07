@@ -307,7 +307,6 @@ export async function buildReleaseContext(cfg: Config, gh: GitHubClient): Promis
       branch: cfg.branch,
       promptUrl: cfg.promptUrl,
       model: cfg.model,
-      temperature: cfg.temperature,
       maxLinkedItems: cfg.maxLinkedItems,
       maxReferenceDepth: cfg.maxReferenceDepth,
       maxItemLength: cfg.maxItemLength,

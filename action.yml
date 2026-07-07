@@ -23,10 +23,6 @@ inputs:
     description: "Gemini model identifier used to generate release notes."
     required: false
     default: "gemini-3.5-flash"
-  temperature:
-    description: "Sampling temperature for the model (0-2)."
-    required: false
-    default: "1.0"
   max-linked-items:
     description: "Cap on how many linked issues, PRs, or commits are fetched."
     required: false

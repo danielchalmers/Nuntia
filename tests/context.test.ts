@@ -15,7 +15,6 @@ describe('buildReleaseContext', () => {
       geminiApiKey: 'gemini-key',
       promptUrl: 'https://example.com/prompt.txt',
       model: 'gemini-3.1-flash-lite',
-      temperature: 1,
       maxLinkedItems: 3,
       maxReferenceDepth: 2,
       maxItemLength: 5000,
@@ -70,7 +69,6 @@ describe('buildReleaseContext', () => {
       geminiApiKey: 'gemini-key',
       promptUrl: 'https://example.com/prompt.txt',
       model: 'gemini-3.1-flash-lite',
-      temperature: 1,
       maxLinkedItems: 3,
       maxReferenceDepth: 2,
       maxItemLength: 5000,
@@ -125,7 +123,6 @@ describe('buildReleaseContext', () => {
       geminiApiKey: 'gemini-key',
       promptUrl: 'https://example.com/prompt.txt',
       model: 'gemini-3.1-flash-lite',
-      temperature: 1,
       maxLinkedItems: 3,
       maxReferenceDepth: 2,
       maxItemLength: 20,
@@ -177,7 +174,6 @@ describe('buildReleaseContext', () => {
       geminiApiKey: 'gemini-key',
       promptUrl: 'https://example.com/prompt.txt',
       model: 'gemini-3.1-flash-lite',
-      temperature: 1,
       maxLinkedItems: 1,
       maxReferenceDepth: 2,
       maxItemLength: 5000,
@@ -254,7 +250,6 @@ describe('buildReleaseContext', () => {
       geminiApiKey: 'gemini-key',
       promptUrl: 'https://example.com/prompt.txt',
       model: 'gemini-3.1-flash-lite',
-      temperature: 1,
       maxLinkedItems: 0,
       maxReferenceDepth: 2,
       maxItemLength: 5000,
@@ -289,7 +284,7 @@ describe('buildReleaseContext', () => {
       baseCommit: 'base1', headCommit: 'head1',
       token: 'token', geminiApiKey: 'gemini-key',
       promptUrl: 'https://example.com/prompt.txt', model: 'gemini-3.1-flash-lite',
-      temperature: 1, maxLinkedItems: 0, maxReferenceDepth: 2, maxItemLength: 5000,
+      maxLinkedItems: 0, maxReferenceDepth: 2, maxItemLength: 5000,
     };
 
     const rangeCommits = Array.from({ length: 300 }, (_, i) => ({
@@ -327,7 +322,7 @@ describe('buildReleaseContext', () => {
       baseCommit: 'base1', headCommit: 'head1',
       token: 'token', geminiApiKey: 'gemini-key',
       promptUrl: 'https://example.com/prompt.txt', model: 'gemini-3.1-flash-lite',
-      temperature: 1, maxLinkedItems: 0, maxReferenceDepth: 2, maxItemLength: 5000,
+      maxLinkedItems: 0, maxReferenceDepth: 2, maxItemLength: 5000,
     };
 
     const gh = {

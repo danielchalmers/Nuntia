@@ -17,7 +17,6 @@ async function run(): Promise<void> {
     branch: cfg.branch,
     promptUrl: cfg.promptUrl,
     model: cfg.model,
-    temperature: cfg.temperature,
     maxLinkedItems: cfg.maxLinkedItems,
     maxReferenceDepth: cfg.maxReferenceDepth,
     maxItemLength: cfg.maxItemLength,
@@ -28,7 +27,7 @@ async function run(): Promise<void> {
 
   const promptText = await fetchPrompt(cfg.promptUrl);
   const { systemPrompt, userPrompt } = buildPrompt(context, promptText);
-  const payload = buildTextPayload(systemPrompt, userPrompt, cfg.model, cfg.temperature);
+  const payload = buildTextPayload(systemPrompt, userPrompt, cfg.model);
 
   console.log(`Generating release notes...`);
   const { text, inputTokens, outputTokens } = await gemini.generateText(payload, 2, 5000);
