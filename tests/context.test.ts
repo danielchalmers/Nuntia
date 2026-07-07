@@ -242,4 +242,121 @@ describe('buildReleaseContext', () => {
     expect(linkedIds).toContain('57');
     expect(getIssueOrPullRequest).toHaveBeenCalledTimes(2);
   });
+
+  it('flags the range as truncated and warns when fewer commits are processed than the total', async () => {
+    const cfg: Config = {
+      owner: 'acme',
+      repo: 'widgets',
+      branch: 'main',
+      baseCommit: 'base1',
+      headCommit: 'head1',
+      token: 'token',
+      geminiApiKey: 'gemini-key',
+      promptUrl: 'https://example.com/prompt.txt',
+      model: 'gemini-3-flash-preview',
+      temperature: 1,
+      maxLinkedItems: 0,
+      maxReferenceDepth: 2,
+      maxItemLength: 5000,
+    };
+
+    const gh = {
+      // Simulate a range whose commits could not be fully recovered.
+      compareCommits: vi.fn().mockResolvedValue({
+        commits: [],
+        status: 'ahead',
+        totalCommits: 300,
+        files: [],
+        filesTruncated: false,
+        commitsTruncated: false,
+      }),
+      getCommit: vi.fn().mockResolvedValue({
+        sha: 'base1full',
+        message: 'Base commit',
+        url: 'https://github.com/acme/widgets/commit/base1full',
+        author: '@dev',
+        date: '2024-01-01T00:00:00Z',
+      }),
+      getIssueOrPullRequest: vi.fn(),
+    } as unknown as GitHubClient;
+
+    const context = await buildReleaseContext(cfg, gh);
+
+    expect(context.range.totalCommits).toBe(301); // 300 range commits + base
+    expect(context.range.processedCommits).toBe(1);
+    expect(context.range.truncated).toBe(true);
+  });
+
+  it('honors the commitsTruncated signal even when the processed count matches the total', async () => {
+    const cfg: Config = {
+      owner: 'acme', repo: 'widgets', branch: 'main',
+      baseCommit: 'base1', headCommit: 'head1',
+      token: 'token', geminiApiKey: 'gemini-key',
+      promptUrl: 'https://example.com/prompt.txt', model: 'gemini-3-flash-preview',
+      temperature: 1, maxLinkedItems: 0, maxReferenceDepth: 2, maxItemLength: 5000,
+    };
+
+    const rangeCommits = Array.from({ length: 300 }, (_, i) => ({
+      sha: `range${i}`.padEnd(40, '0'),
+      message: `Change ${i}`,
+      url: `https://github.com/acme/widgets/commit/range${i}`,
+      author: '@dev',
+      date: '2024-01-01T00:00:00Z',
+    }));
+
+    const gh = {
+      compareCommits: vi.fn().mockResolvedValue({
+        commits: rangeCommits,
+        status: 'ahead',
+        totalCommits: 300,
+        files: [],
+        filesTruncated: false,
+        commitsTruncated: true, // recovery could not confirm completeness
+      }),
+      getCommit: vi.fn().mockResolvedValue({
+        sha: 'base1full', message: 'Base commit',
+        url: 'https://github.com/acme/widgets/commit/base1full', author: '@dev', date: '2024-01-01T00:00:00Z',
+      }),
+      getIssueOrPullRequest: vi.fn(),
+    } as unknown as GitHubClient;
+
+    const context = await buildReleaseContext(cfg, gh);
+
+    // base + 300 range commits = 301 == authoritative total, but the client signalled
+    // the recovery was unconfirmed, so the range must still be reported as truncated.
+    expect(context.range.processedCommits).toBe(301);
+    expect(context.range.totalCommits).toBe(301);
+    expect(context.range.truncated).toBe(true);
+  });
+
+  it('flags changedFilesTruncated when the compare file list is capped', async () => {
+    const cfg: Config = {
+      owner: 'acme', repo: 'widgets', branch: 'main',
+      baseCommit: 'base1', headCommit: 'head1',
+      token: 'token', geminiApiKey: 'gemini-key',
+      promptUrl: 'https://example.com/prompt.txt', model: 'gemini-3-flash-preview',
+      temperature: 1, maxLinkedItems: 0, maxReferenceDepth: 2, maxItemLength: 5000,
+    };
+
+    const gh = {
+      compareCommits: vi.fn().mockResolvedValue({
+        commits: [{ sha: 'c1', message: 'Change one', url: '', author: '@dev', date: '2024-01-01T00:00:00Z' }],
+        status: 'ahead',
+        totalCommits: 1,
+        files: ['a.ts', 'b.ts'],
+        filesTruncated: true,
+        commitsTruncated: false,
+      }),
+      getCommit: vi.fn().mockResolvedValue({
+        sha: 'base1full', message: 'Base commit',
+        url: 'https://github.com/acme/widgets/commit/base1full', author: '@dev', date: '2024-01-01T00:00:00Z',
+      }),
+      getIssueOrPullRequest: vi.fn(),
+    } as unknown as GitHubClient;
+
+    const context = await buildReleaseContext(cfg, gh);
+
+    expect(context.range.changedFilesTruncated).toBe(true);
+    expect(context.range.truncated).toBe(false); // the commit range itself is complete
+  });
 });

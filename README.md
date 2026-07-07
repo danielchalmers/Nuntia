@@ -36,6 +36,7 @@ Generate AI-authored release notes and migration guides from a commit range, on 
 | `release-notes-path` | Filesystem path to the release notes markdown. |
 | `input-tokens` | Gemini prompt token count. |
 | `output-tokens` | Gemini output token count. |
+| `truncated` | `true` if the commit range or changed-file list could not be fully included. |
 
 ## License
 

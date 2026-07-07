@@ -1,3 +1,4 @@
+import * as core from '@actions/core';
 import type { CommitInfo, Config, LinkedItem, Reference, ReleaseContext } from './types';
 import { extractReferences, referenceKey, summarizeReferences } from './references';
 import type { CommitDetails, IssueOrPullDetails } from './github';
@@ -114,7 +115,7 @@ function applyItemTextLimit(
 }
 
 export async function buildReleaseContext(cfg: Config, gh: GitHubClient): Promise<ReleaseContext> {
-  const { commits: compareCommits, status, totalCommits, files } = await gh.compareCommits(
+  const { commits: compareCommits, status, totalCommits, files, filesTruncated, commitsTruncated } = await gh.compareCommits(
     cfg.baseCommit,
     cfg.headCommit
   );
@@ -142,10 +143,6 @@ export async function buildReleaseContext(cfg: Config, gh: GitHubClient): Promis
     for (const ref of refs) {
       queue.push({ ref, depth: 1, source, rootCommitSha: commitInfo.sha });
     }
-  }
-
-  if (typeof totalCommits === 'number' && totalCommits + 1 > commits.length) {
-    console.warn(`⚠️ Compare API returned ${commits.length} commit(s), but total_commits is ${totalCommits}.`);
   }
 
   const linkedItems = new Map<string, LinkedItem>();
@@ -243,14 +240,41 @@ export async function buildReleaseContext(cfg: Config, gh: GitHubClient): Promis
     }
   }
 
+  // Authoritative base-inclusive commit count for the range. compareCommits'
+  // total_commits is base-exclusive, so add one for the base commit itself.
+  const authoritativeTotal =
+    cfg.baseCommit === cfg.headCommit
+      ? 1
+      : (typeof totalCommits === 'number' ? totalCommits : compareCommits.length) + 1;
+  const processedCommits = commitEntries.length;
+  // Trust the client's completeness signal (which knows whether the >250 recovery
+  // actually reached the merge-base) in addition to the raw count check.
+  const truncated = commitsTruncated || processedCommits < authoritativeTotal;
+
+  if (truncated) {
+    core.warning(
+      `Release range may be incomplete: ${processedCommits} of ${authoritativeTotal} commit(s) in ${cfg.baseCommit}..${cfg.headCommit} were included and full completeness could not be verified. Some changes may be missing from the generated notes.`
+    );
+  }
+  if (filesTruncated) {
+    core.warning(
+      `Changed-file list hit GitHub's 300-file compare cap; some changed files are omitted from the release context.`
+    );
+  }
+
   const range: ReleaseContext['range'] = {
     base: cfg.baseCommit,
     head: cfg.headCommit,
-    totalCommits: commitEntries.length,
+    totalCommits: authoritativeTotal,
+    processedCommits,
+    truncated,
     changedFiles: files,
   };
   if (status !== undefined) {
     range.status = status;
+  }
+  if (filesTruncated) {
+    range.changedFilesTruncated = true;
   }
 
   const maxItemLength = cfg.maxItemLength;

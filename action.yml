@@ -47,6 +47,8 @@ outputs:
     description: "Gemini input token count."
   output-tokens:
     description: "Gemini output token count."
+  truncated:
+    description: "True if the commit range could not be fully included (some commits or changed files were omitted)."
 
 runs:
   using: "node24"
