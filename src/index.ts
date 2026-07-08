@@ -2,7 +2,7 @@ import * as core from '@actions/core';
 import { getConfig } from './env';
 import { GitHubClient } from './github';
 import { buildReleaseContext } from './context';
-import { resolveReleaseRange } from './release';
+import { resolvePreviousTag } from './release';
 import { buildPrompt, fetchPrompt } from './prompt';
 import { buildTextPayload, GeminiClient } from './gemini';
 import { writeTextFile } from './storage';
@@ -12,16 +12,20 @@ async function run(): Promise<void> {
   const gh = new GitHubClient(cfg.token, cfg.owner, cfg.repo);
   const gemini = new GeminiClient(cfg.geminiApiKey);
 
-  // Release mode: derive base/head/branch from the published release using GitHub's own
-  // previous-tag logic before anything else runs.
-  if (cfg.releaseMode) {
-    const resolved = await resolveReleaseRange(gh, cfg.releaseTag ?? '');
-    cfg.baseCommit = resolved.base;
-    cfg.headCommit = resolved.head;
-    cfg.branch = resolved.branch || cfg.branch || resolved.head;
-    console.log(
-      `Resolved release ${resolved.head}: base=${resolved.isFirstRelease ? '(first release: whole history)' : resolved.base}, branch=${cfg.branch}.`
-    );
+  // On a published release, ask GitHub which release came before this one and diff against it.
+  // head/branch already come from the release event (resolved in getConfig).
+  if (cfg.releaseMode && cfg.releaseTag) {
+    const { base, isFirstRelease } = await resolvePreviousTag(gh, cfg.releaseTag);
+    if (isFirstRelease) {
+      const message = `First release ${cfg.releaseTag}: no previous release to compare against, so there is nothing to summarize.`;
+      console.log(message);
+      if (process.env.GITHUB_STEP_SUMMARY) {
+        await core.summary.addRaw(`_${message}_`).write();
+      }
+      return;
+    }
+    cfg.baseCommit = base;
+    console.log(`Release ${cfg.releaseTag}: summarizing changes since ${base} on ${cfg.branch}.`);
   }
 
   console.log('Inputs:', {

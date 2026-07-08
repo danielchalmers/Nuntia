@@ -115,64 +115,37 @@ function applyItemTextLimit(
 }
 
 export async function buildReleaseContext(cfg: Config, gh: GitHubClient): Promise<ReleaseContext> {
-  // An empty base means "first release": there is no previous tag to diff against, so the range is
-  // the whole history up to head. Every other path resolves the range via the compare API.
-  const isFirstRelease = cfg.baseCommit.trim() === '';
+  const { commits: compareCommits, status, totalCommits, files, filesTruncated, commitsTruncated } = await gh.compareCommits(
+    cfg.baseCommit,
+    cfg.headCommit
+  );
 
-  let commits: CommitDetails[] = [];
-  let authoritativeTotal: number;
-  let commitsTruncated = false;
-  let filesTruncated = false;
-  let files: string[] = [];
-  let status: string | undefined;
-
-  if (isFirstRelease) {
-    const history = await gh.listHistory(cfg.headCommit);
-    if (!history.reachedRoot) {
+  // Guard against a reversed or empty range before generating anything. Since base/head are
+  // derived from the release, a bad inference would otherwise silently yield base-only notes.
+  if (cfg.baseCommit !== cfg.headCommit) {
+    if (status === 'behind') {
       throw new Error(
-        `First-release history for ${cfg.headCommit} exceeded the walk bound before reaching the repository root, so the full range could not be verifiably recovered. Pass base-commit explicitly to scope the range.`
+        `Commit range ${cfg.baseCommit}..${cfg.headCommit} is 'behind': the head is an ancestor of the base, so the two look reversed. Refusing to generate notes over a backward range.`
       );
     }
-    commits = history.commits;
-    authoritativeTotal = commits.length;
-    status = 'first-release';
+    if (status !== 'identical' && totalCommits === 0) {
+      throw new Error(
+        `Commit range ${cfg.baseCommit}..${cfg.headCommit} contains no commits (compare status '${status ?? 'unknown'}'). Check that base and head are in the right order.`
+      );
+    }
+    if (status === 'diverged') {
+      core.warning(
+        `Commit range ${cfg.baseCommit}..${cfg.headCommit} is 'diverged': the base is not an ancestor of the head, so the base commit may sit off the range. Verify the generated notes.`
+      );
+    }
+  }
+
+  let commits: CommitDetails[] = [];
+  if (cfg.baseCommit === cfg.headCommit) {
+    commits = [await gh.getCommit(cfg.owner, cfg.repo, cfg.baseCommit)];
   } else {
-    const compared = await gh.compareCommits(cfg.baseCommit, cfg.headCommit);
-    status = compared.status;
-    files = compared.files;
-    filesTruncated = compared.filesTruncated;
-    commitsTruncated = compared.commitsTruncated;
-
-    // Guard against a reversed or empty range before generating anything. Once base/head are
-    // auto-inferred from a release, a bad inference would otherwise silently yield base-only notes.
-    if (cfg.baseCommit !== cfg.headCommit) {
-      if (status === 'behind') {
-        throw new Error(
-          `Commit range ${cfg.baseCommit}..${cfg.headCommit} is 'behind': the head is an ancestor of the base, so the two look reversed. Refusing to generate notes over a backward range.`
-        );
-      }
-      if (status !== 'identical' && compared.totalCommits === 0) {
-        throw new Error(
-          `Commit range ${cfg.baseCommit}..${cfg.headCommit} contains no commits (compare status '${status ?? 'unknown'}'). Check that base and head are in the right order.`
-        );
-      }
-      if (status === 'diverged') {
-        core.warning(
-          `Commit range ${cfg.baseCommit}..${cfg.headCommit} is 'diverged': the base is not an ancestor of the head, so the base commit may sit off the range. Verify the generated notes.`
-        );
-      }
-    }
-
-    if (cfg.baseCommit === cfg.headCommit) {
-      commits = [await gh.getCommit(cfg.owner, cfg.repo, cfg.baseCommit)];
-      authoritativeTotal = 1;
-    } else {
-      const baseCommit = await gh.getCommit(cfg.owner, cfg.repo, cfg.baseCommit);
-      commits = [baseCommit, ...compared.commits];
-      // compare's total_commits is base-exclusive, so add one for the base commit itself.
-      authoritativeTotal =
-        (typeof compared.totalCommits === 'number' ? compared.totalCommits : compared.commits.length) + 1;
-    }
+    const baseCommit = await gh.getCommit(cfg.owner, cfg.repo, cfg.baseCommit);
+    commits = [baseCommit, ...compareCommits];
   }
 
   const knownCommits = new Set(commits.map(commit => commit.sha.toLowerCase()));
@@ -287,6 +260,11 @@ export async function buildReleaseContext(cfg: Config, gh: GitHubClient): Promis
     }
   }
 
+  // Authoritative base-inclusive commit count for the range. compareCommits' total_commits is base-exclusive, so add one for the base commit itself.
+  const authoritativeTotal =
+    cfg.baseCommit === cfg.headCommit
+      ? 1
+      : (typeof totalCommits === 'number' ? totalCommits : compareCommits.length) + 1;
   const processedCommits = commitEntries.length;
 
   // A release-notes tool must never publish an incomplete changelog.

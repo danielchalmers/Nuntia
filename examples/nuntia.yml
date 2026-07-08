@@ -4,62 +4,34 @@
 #   1. Copy this file to .github/workflows/nuntia.yml in your repo.
 #   2. Add a GEMINI_API_KEY repository secret (https://aistudio.google.com/apikey).
 #      GITHUB_TOKEN is provided automatically — you don't add it.
-#   3. Publish a GitHub Release. Nuntia figures out what changed since your previous
-#      release and writes the notes to the run summary + a downloadable artifact.
 #
-# Don't like the result? Open the run and choose "Re-run jobs" to regenerate.
-# Want a different model or prompt for one run? Use "Run workflow" and fill the inputs.
+# Then just publish a GitHub release. Nuntia reads the release you published, works out what
+# changed since your previous release, and writes the notes to the workflow run summary and a
+# downloadable artifact. Don't like them? Open the run and choose "Re-run jobs" to regenerate.
 #
 # Docs: https://github.com/danielchalmers/Nuntia
 name: Nuntia
 
 on:
   release:
-    types: [published] # automatic: reads the release GitHub just created
-  workflow_dispatch: # manual: retries and per-run overrides
-    inputs:
-      release-tag:
-        description: "Release tag to (re)generate notes for (e.g. v1.2.0). Blank = latest published release."
-        required: false
-      model:
-        description: "Gemini model."
-        required: false
-        default: "gemini-3.5-flash"
-      prompt-url:
-        description: "Prompt template URL (raw). Blank = Nuntia's built-in prompt."
-        required: false
+    types: [published]
 
-# Least privilege: Nuntia only reads commits, releases, issues and pull requests.
 permissions:
   contents: read
   issues: read
   pull-requests: read
 
-# One run per release tag; a manual retry supersedes older queued work for the same tag.
-concurrency:
-  group: nuntia-${{ github.event.release.tag_name || inputs.release-tag || github.ref }}
-  cancel-in-progress: false
-
 jobs:
   release-notes:
     runs-on: ubuntu-latest
     steps:
-      - name: Generate release notes
-        id: nuntia
-        uses: danielchalmers/Nuntia@v1
-        with:
-          # base = previous release, head = this tag, branch = the release's target —
-          # all inferred from the tag. No commit SHAs to paste.
-          release-tag: ${{ github.event.release.tag_name || inputs.release-tag }}
-          model: ${{ inputs.model || 'gemini-3.5-flash' }}
-          prompt-url: ${{ inputs.prompt-url }} # blank -> Nuntia's built-in prompt
+      - uses: danielchalmers/Nuntia@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
 
-      - name: Upload release notes
-        uses: actions/upload-artifact@v7
+      - uses: actions/upload-artifact@v7
         with:
-          name: nuntia-release-notes-${{ github.run_number }}
+          name: release-notes
           path: artifacts
           if-no-files-found: error

@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { parseRangeFromNotes, resolveReleaseRange } from '../src/release';
+import { parseRangeFromNotes, resolvePreviousTag } from '../src/release';
 import type { GitHubClient } from '../src/github';
 
 describe('parseRangeFromNotes', () => {
@@ -29,59 +29,30 @@ describe('parseRangeFromNotes', () => {
   });
 });
 
-describe('resolveReleaseRange', () => {
-  it('resolves base/head/branch from a tag via generate-notes', async () => {
+describe('resolvePreviousTag', () => {
+  it('asks GitHub for the notes and returns the previous tag as the base', async () => {
     const gh = {
-      getReleaseByTag: vi.fn().mockResolvedValue({ id: 42, tagName: 'v9.6.0', targetCommitish: 'dev' }),
-      getLatestRelease: vi.fn(),
       generateReleaseNotes: vi
         .fn()
         .mockResolvedValue('**Full Changelog**: https://github.com/acme/widgets/compare/v9.5.0...v9.6.0'),
     } as unknown as GitHubClient;
 
-    const resolved = await resolveReleaseRange(gh, 'v9.6.0');
+    const resolved = await resolvePreviousTag(gh, 'v9.6.0');
 
-    expect(resolved).toEqual({
-      base: 'v9.5.0',
-      head: 'v9.6.0',
-      branch: 'dev',
-      releaseId: 42,
-      isFirstRelease: false,
-    });
-    expect((gh.getLatestRelease as any)).not.toHaveBeenCalled();
     expect((gh.generateReleaseNotes as any)).toHaveBeenCalledWith('v9.6.0');
-  });
-
-  it('resolves the latest release when the tag is blank', async () => {
-    const gh = {
-      getReleaseByTag: vi.fn(),
-      getLatestRelease: vi.fn().mockResolvedValue({ id: 7, tagName: 'v2.0.0', targetCommitish: 'main' }),
-      generateReleaseNotes: vi
-        .fn()
-        .mockResolvedValue('**Full Changelog**: https://github.com/acme/widgets/compare/v1.9.0...v2.0.0'),
-    } as unknown as GitHubClient;
-
-    const resolved = await resolveReleaseRange(gh, '');
-
-    expect((gh.getReleaseByTag as any)).not.toHaveBeenCalled();
-    expect(resolved.base).toBe('v1.9.0');
-    expect(resolved.head).toBe('v2.0.0');
-    expect(resolved.branch).toBe('main');
+    expect(resolved).toEqual({ base: 'v9.5.0', isFirstRelease: false });
   });
 
   it('flags a first release with an empty base', async () => {
     const gh = {
-      getReleaseByTag: vi.fn().mockResolvedValue({ id: 1, tagName: 'v1.0.0', targetCommitish: 'main' }),
-      getLatestRelease: vi.fn(),
       generateReleaseNotes: vi
         .fn()
         .mockResolvedValue('**Full Changelog**: https://github.com/acme/widgets/commits/v1.0.0'),
     } as unknown as GitHubClient;
 
-    const resolved = await resolveReleaseRange(gh, 'v1.0.0');
+    const resolved = await resolvePreviousTag(gh, 'v1.0.0');
 
     expect(resolved.isFirstRelease).toBe(true);
     expect(resolved.base).toBe('');
-    expect(resolved.head).toBe('v1.0.0');
   });
 });

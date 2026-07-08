@@ -70,32 +70,27 @@ export function getConfig(): Config {
   if (!token) throw new Error('GITHUB_TOKEN missing (add: secrets.GITHUB_TOKEN).');
   if (!geminiApiKey) throw new Error('GEMINI_API_KEY missing (add it as a repository secret).');
 
-  const releaseTag = core.getInput('release-tag').trim();
-  const rawBase = core.getInput('base-commit').trim();
-  const rawHead = core.getInput('head-commit').trim();
-  const rawBranch = core.getInput('branch').trim();
+  // The one way: when triggered by a published release, read the release straight from the event
+  // payload — nothing to wire in the workflow. head/branch come from the release; the previous
+  // release (base) is resolved in index.ts. Anything else falls back to an explicit commit range.
+  const release = (github.context.payload as { release?: { tag_name?: unknown; target_commitish?: unknown } }).release;
+  const releaseTag = typeof release?.tag_name === 'string' ? release.tag_name : '';
+  const releaseMode = releaseTag !== '';
 
-  // Release mode: derive base/head/branch from a published GitHub Release instead of explicit SHAs.
-  // Entered when a release-tag is given, or when nothing was specified at all (resolve the latest release).
-  const releaseMode = releaseTag !== '' || (rawBase === '' && rawHead === '');
-
-  let baseCommit = rawBase;
-  let headCommit = rawHead;
-  let branch = rawBranch;
+  let baseCommit = '';
+  let headCommit = '';
+  let branch = '';
 
   if (releaseMode) {
-    // base/head/branch are resolved later from the release; only owner/repo are needed up front.
-    // An explicit owner/repo@branch still overrides the target repo for cross-repo runs.
-    if (rawBranch) {
-      const branchTarget = parseBranchInput(rawBranch, owner || '', repo || '');
-      owner = branchTarget.owner;
-      repo = branchTarget.repo;
-      branch = branchTarget.branch;
-    }
+    headCommit = releaseTag;
+    branch = (typeof release?.target_commitish === 'string' && release.target_commitish) || '';
     if (!owner || !repo) {
       throw new Error('Failed to resolve repository context (owner/repo). Ensure this runs in GitHub Actions with a valid repository context.');
     }
   } else {
+    if (!core.getInput('base-commit').trim() || !core.getInput('head-commit').trim()) {
+      throw new Error('Nuntia runs on the `release: published` event. To run it another way, provide base-commit and head-commit for an explicit range.');
+    }
     baseCommit = requireInput('base-commit');
     headCommit = requireInput('head-commit');
     const branchTarget = parseBranchInput(requireInput('branch'), owner || '', repo || '');

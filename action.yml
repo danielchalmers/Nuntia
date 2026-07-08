@@ -6,17 +6,17 @@ branding:
   icon: "file-text"
 
 inputs:
-  release-tag:
-    description: "Release tag to generate notes for. When set, Nuntia resolves base = previous release, head = this tag, and branch = the release's target — no SHAs needed. Leave blank (with no base/head) to use the latest published release."
-    required: false
+  # On the `release: published` event, Nuntia reads the tag and branch from the release itself and
+  # diffs against the previous release — no inputs needed. base-commit/head-commit are the fallback
+  # for running over an arbitrary commit range outside a release.
   base-commit:
-    description: "Start commit SHA/ref (inclusive) for the range. Optional when release-tag is used; required for an arbitrary range."
+    description: "Start commit SHA/ref (inclusive). Only for running over an explicit range instead of a release."
     required: false
   head-commit:
-    description: "End commit SHA/ref (inclusive) for the range. Optional when release-tag is used; required for an arbitrary range."
+    description: "End commit SHA/ref (inclusive). Only for running over an explicit range instead of a release."
     required: false
   branch:
-    description: "Branch name associated with the release notes (metadata only). Also accepts owner/repo@branch to target another repo. Optional in release mode."
+    description: "Branch name for the notes metadata (or owner/repo@branch to target another repo). Only used with base/head."
     required: false
   prompt-url:
     description: "URL for the prompt template. Leave blank to use Nuntia's built-in prompt."

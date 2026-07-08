@@ -7,19 +7,17 @@ All notable changes to Nuntia are documented here. The format is based on
 
 ### Added
 
-- **Release mode.** Trigger on published releases and let Nuntia infer the commit range. A new
-  `release-tag` input resolves base = previous release, head = the tag, and branch = the release's
-  target using GitHub's own previous-tag logic. Leave `release-tag` (and base/head) blank to use the
-  latest published release.
-- First-release support: when there is no previous tag, notes cover the whole history up to the tag.
+- **Runs on published releases.** Trigger on `release: published` and Nuntia reads the release from
+  the event — its tag and branch — then diffs against the previous release (via GitHub's own
+  generate-notes logic). No inputs to configure; the notes go to the run summary and an artifact.
 
 ### Changed
 
-- **Breaking:** `base-commit`, `head-commit`, and `branch` are now optional. Provide them for an
-  arbitrary range, or use `release-tag` (or nothing) for release mode.
+- **Breaking:** `base-commit`, `head-commit`, and `branch` are now optional — they're only for
+  running over an explicit range outside a release.
 - `prompt-url` is now optional and documented as such; blank uses the built-in prompt.
 - The example workflow is now [`examples/nuntia.yml`](./examples/nuntia.yml) (renamed from
-  `examples/workflows/nuntia-release-notes.yml`) and runs automatically on `release: published`.
+  `examples/workflows/nuntia-release-notes.yml`) and triggers on `release: published` with no inputs.
 
 ### Fixed
 

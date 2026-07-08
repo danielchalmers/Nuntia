@@ -22,11 +22,6 @@ export type IssueOrPullDetails = {
   repo: string;
 };
 
-export type ReleaseSummary = {
-  id: number;
-  tagName: string;
-  targetCommitish: string;
-};
 
 export class GitHubClient {
   private octokit;
@@ -269,90 +264,6 @@ export class GitHubClient {
     // Trimming an oversized (superset) walk is left to the caller so it can decide completeness from the raw walk before any trim masks a mismatch.
     collected.reverse();
     return { commits: collected, reachedBase };
-  }
-
-  /**
-   * List every ancestor of `head` (oldest-first), for the first-release case where there is no
-   * previous tag to diff against and the intended range is "repo start .. head".
-   * `reachedRoot` is false only when the walk hit its safety bound without exhausting history;
-   * callers must treat that as an incomplete range and refuse to publish partial notes.
-   */
-  async listHistory(head: string): Promise<{ commits: CommitDetails[]; reachedRoot: boolean }> {
-    const perPage = 100;
-    // Safety bound so an enormous first-release history can't run away on API calls/tokens.
-    // A larger first release should scope the range with an explicit base-commit instead.
-    const maxCommits = 1000;
-    let page = 1;
-    const collected: CommitDetails[] = [];
-    const seen = new Set<string>();
-    let reachedRoot = false;
-
-    while (true) {
-      this.incrementApiCalls();
-      const { data } = await this.octokit.rest.repos.listCommits({
-        owner: this.owner,
-        repo: this.repo,
-        sha: head,
-        per_page: perPage,
-        page,
-      });
-      const pageCommits = Array.isArray(data) ? data : [];
-      if (pageCommits.length === 0) {
-        reachedRoot = true;
-        break;
-      }
-
-      for (const commit of pageCommits) {
-        const sha = typeof commit?.sha === 'string' ? commit.sha : '';
-        if (sha && seen.has(sha)) continue;
-        if (sha) seen.add(sha);
-        collected.push(this.mapCommit(commit));
-      }
-
-      if (pageCommits.length < perPage) {
-        reachedRoot = true;
-        break;
-      }
-      if (collected.length >= maxCommits) break;
-      page++;
-    }
-
-    // listCommits returns newest-first; reverse to keep the rest of the pipeline oldest-first.
-    collected.reverse();
-    return { commits: collected, reachedRoot };
-  }
-
-  async getReleaseByTag(tag: string): Promise<ReleaseSummary> {
-    this.incrementApiCalls();
-    try {
-      const { data } = await this.octokit.rest.repos.getReleaseByTag({
-        owner: this.owner,
-        repo: this.repo,
-        tag,
-      });
-      return { id: data.id, tagName: data.tag_name, targetCommitish: data.target_commitish || '' };
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      throw new Error(
-        `No published GitHub Release found for tag "${tag}" in ${this.owner}/${this.repo}. Publish the release first, or pass base-commit/head-commit for an arbitrary range. (${message})`
-      );
-    }
-  }
-
-  async getLatestRelease(): Promise<ReleaseSummary> {
-    this.incrementApiCalls();
-    try {
-      const { data } = await this.octokit.rest.repos.getLatestRelease({
-        owner: this.owner,
-        repo: this.repo,
-      });
-      return { id: data.id, tagName: data.tag_name, targetCommitish: data.target_commitish || '' };
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      throw new Error(
-        `Could not find a latest published release in ${this.owner}/${this.repo}. Publish a non-draft, non-prerelease release, or pass release-tag / base-commit explicitly. (${message})`
-      );
-    }
   }
 
   /**

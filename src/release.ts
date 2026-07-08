@@ -1,13 +1,5 @@
 import type { GitHubClient } from './github';
 
-export type ResolvedRelease = {
-  base: string; // previous release tag; '' when this is the first release (whole-history mode)
-  head: string; // the release tag
-  branch: string; // the release's target branch/commitish
-  releaseId: number;
-  isFirstRelease: boolean;
-};
-
 // Matches the compare/first-release link GitHub appends to generated notes:
 //   **Full Changelog**: https://github.com/o/r/compare/v1.0.0...v1.1.0
 //   **Full Changelog**: https://github.com/o/r/commits/v1.0.0   (first release, no previous tag)
@@ -28,25 +20,15 @@ export function parseRangeFromNotes(body: string): { base: string; isFirstReleas
   if (COMMITS_LINK.test(body)) {
     return { base: '', isFirstRelease: true };
   }
-  // No recognizable changelog link. Treat as first release rather than guessing a wrong base;
-  // the whole-history walk (or an explicit base-commit) is the safe fallback.
+  // No recognizable changelog link: treat as first release rather than guess a wrong base.
   return { base: '', isFirstRelease: true };
 }
 
 /**
- * Resolve the base/head/branch for a release from its tag, using GitHub's own previous-tag logic.
- * When releaseTag is empty, resolves the repository's latest published release.
+ * Ask GitHub which release came before `tag`, using its own previous-tag logic (the same one that
+ * fills the auto-generated release body). Returns the previous tag as the base, or a first-release flag.
  */
-export async function resolveReleaseRange(gh: GitHubClient, releaseTag: string): Promise<ResolvedRelease> {
-  const release = releaseTag ? await gh.getReleaseByTag(releaseTag) : await gh.getLatestRelease();
-  const tag = release.tagName;
+export async function resolvePreviousTag(gh: GitHubClient, tag: string): Promise<{ base: string; isFirstRelease: boolean }> {
   const notes = await gh.generateReleaseNotes(tag);
-  const { base, isFirstRelease } = parseRangeFromNotes(notes);
-  return {
-    base,
-    head: tag,
-    branch: release.targetCommitish,
-    releaseId: release.id,
-    isFirstRelease,
-  };
+  return parseRangeFromNotes(notes);
 }

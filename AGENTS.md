@@ -180,8 +180,8 @@ The action is defined in `action.yml` and runs from `dist/index.js`. Key points:
 
 ### Two ways to resolve the commit range
 
-- **Release mode** (the friendly default, used by `examples/nuntia.yml`): pass `release-tag` (or nothing at all). `src/release.ts` calls GitHub's `generate-notes` API to recover the previous tag, sets base = previous release, head = the tag, and branch = the release's target. A first release (no previous tag) covers the whole history via `GitHubClient.listHistory`.
-- **Range mode**: pass explicit `base-commit` + `head-commit` (+ optional `branch`) for an arbitrary range. `src/env.ts` selects the mode; release mode is entered when `release-tag` is set or when no base/head is given.
+- **Release mode** (the one way for consumers, used by `examples/nuntia.yml`): triggered by the `release: published` event. `src/env.ts` reads the release's `tag_name` and `target_commitish` from `github.context.payload.release`; `src/release.ts` then calls GitHub's `generate-notes` API and parses its "Full Changelog" link to recover the previous release (the base). A first release (no previous tag) logs a notice and exits without generating.
+- **Range mode** (fallback, used by the CI smoke test): provide explicit `base-commit` + `head-commit` (+ optional `branch`). Entered whenever the run is not a release event.
 
 ## Releasing / versioning
 
