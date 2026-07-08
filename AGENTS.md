@@ -175,8 +175,27 @@ The action is defined in `action.yml` and runs from `dist/index.js`. Key points:
 - **Entry point**: `dist/index.js`
 - **Runtime**: Node.js 24 (specified in `action.yml`)
 - **Inputs**: Defined in `action.yml`
-- **Prompt URL input**: `prompt-url` (required; fetches raw prompt content)
-- **Prompt template**: `examples/Nuntia.prompt` (reference source; not loaded automatically)
+- **Prompt URL input**: `prompt-url` (optional; blank falls back to the built-in prompt at `examples/Nuntia.prompt`)
+- **Prompt template**: `examples/Nuntia.prompt` (the default prompt, served by raw URL; not read from disk at runtime)
+
+### Two ways to resolve the commit range
+
+- **Release mode** (the friendly default, used by `examples/nuntia.yml`): pass `release-tag` (or nothing at all). `src/release.ts` calls GitHub's `generate-notes` API to recover the previous tag, sets base = previous release, head = the tag, and branch = the release's target. A first release (no previous tag) covers the whole history via `GitHubClient.listHistory`.
+- **Range mode**: pass explicit `base-commit` + `head-commit` (+ optional `branch`) for an arbitrary range. `src/env.ts` selects the mode; release mode is entered when `release-tag` is set or when no base/head is given.
+
+## Releasing / versioning
+
+Consumers pin `danielchalmers/Nuntia@v1`, so cut real tags and keep the major tag moving:
+
+```bash
+npm run verify            # typecheck + tests + build + dist check
+git tag -a v1.0.0 -m "..."
+git push origin v1.0.0
+git tag -f v1 v1.0.0      # move the major tag to the new release
+git push -f origin v1
+```
+
+The tagged commit must include a freshly built `dist/` (CI enforces this). Record user-facing changes — especially breaking input changes — in `CHANGELOG.md`.
 
 ## File Artifacts
 

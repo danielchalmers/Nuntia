@@ -11,6 +11,10 @@ export type Config = {
   maxLinkedItems: number;
   maxReferenceDepth: number;
   maxItemLength: number;
+  // Release mode: when set, base/head/branch are resolved from a published GitHub Release
+  // instead of being passed as explicit inputs. releaseTag is empty when resolving the latest release.
+  releaseMode?: boolean;
+  releaseTag?: string;
 };
 
 export type ReferenceType = 'issue' | 'pull' | 'commit';

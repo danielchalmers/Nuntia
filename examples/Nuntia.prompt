@@ -4,16 +4,11 @@ GOAL
 Generate a human-readable, polished set of release notes with embedded migration guidance from the provided JSON context.
 
 OUTPUT FORMAT
-Use this exact Markdown structure and heading names. Do not add extra top-level sections.
+Use these exact section names and heading levels. Do not add extra top-level sections.
 Only include sections that have at least one applicable entry. Omit empty sections entirely.
-
-# Release Notes
-
-**Release metadata:**
-- Generated at: {generatedAt}
-- Repository: {repository.owner}/{repository.repo}
-- Branch: {repository.branch}
-- Commit range: {range.base}..{range.head} (inclusive)
+Do not write a top-level title or a metadata header. Nuntia adds the "# Release Notes" title and the
+release metadata (repository, branch, commit range, timestamp) automatically, so begin your output at
+the first applicable "## " section.
 
 For every entry in included sections, use this exact pattern:
 

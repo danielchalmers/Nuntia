@@ -6,18 +6,21 @@ branding:
   icon: "file-text"
 
 inputs:
+  release-tag:
+    description: "Release tag to generate notes for. When set, Nuntia resolves base = previous release, head = this tag, and branch = the release's target — no SHAs needed. Leave blank (with no base/head) to use the latest published release."
+    required: false
   base-commit:
-    description: "Start commit SHA (inclusive) for the release notes range."
-    required: true
+    description: "Start commit SHA/ref (inclusive) for the range. Optional when release-tag is used; required for an arbitrary range."
+    required: false
   head-commit:
-    description: "End commit SHA (inclusive) for the release notes range."
-    required: true
+    description: "End commit SHA/ref (inclusive) for the range. Optional when release-tag is used; required for an arbitrary range."
+    required: false
   branch:
-    description: "Branch name associated with the release notes."
-    required: true
+    description: "Branch name associated with the release notes (metadata only). Also accepts owner/repo@branch to target another repo. Optional in release mode."
+    required: false
   prompt-url:
-    description: "URL for prompt template."
-    required: true
+    description: "URL for the prompt template. Leave blank to use Nuntia's built-in prompt."
+    required: false
     default: "https://raw.githubusercontent.com/danielchalmers/Nuntia/refs/heads/main/examples/Nuntia.prompt"
   model:
     description: "Gemini model identifier used to generate release notes."

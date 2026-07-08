@@ -2,6 +2,12 @@ import * as core from '@actions/core';
 import * as github from '@actions/github';
 import type { Config } from './types';
 
+// Built-in prompt served from the repo. Used when prompt-url is left blank so the action works
+// with zero configuration; keep in sync with the default in action.yml.
+const DEFAULT_PROMPT_URL =
+  'https://raw.githubusercontent.com/danielchalmers/Nuntia/refs/heads/main/examples/Nuntia.prompt';
+const DEFAULT_MODEL = 'gemini-3.5-flash';
+
 function parseNumber(input: string, fallback: number): number {
   const value = Number(input);
   return Number.isFinite(value) ? value : fallback;
@@ -64,18 +70,45 @@ export function getConfig(): Config {
   if (!token) throw new Error('GITHUB_TOKEN missing (add: secrets.GITHUB_TOKEN).');
   if (!geminiApiKey) throw new Error('GEMINI_API_KEY missing (add it as a repository secret).');
 
-  const baseCommit = requireInput('base-commit');
-  const headCommit = requireInput('head-commit');
-  const rawBranch = requireInput('branch');
-  const branchTarget = parseBranchInput(rawBranch, owner || '', repo || '');
-  owner = branchTarget.owner;
-  repo = branchTarget.repo;
-  const branch = branchTarget.branch;
-  if (!owner || !repo) {
-    throw new Error('Failed to resolve repository context (owner/repo). Ensure this runs in GitHub Actions with a valid repository context or pass branch as owner/repo@branch.');
+  const releaseTag = core.getInput('release-tag').trim();
+  const rawBase = core.getInput('base-commit').trim();
+  const rawHead = core.getInput('head-commit').trim();
+  const rawBranch = core.getInput('branch').trim();
+
+  // Release mode: derive base/head/branch from a published GitHub Release instead of explicit SHAs.
+  // Entered when a release-tag is given, or when nothing was specified at all (resolve the latest release).
+  const releaseMode = releaseTag !== '' || (rawBase === '' && rawHead === '');
+
+  let baseCommit = rawBase;
+  let headCommit = rawHead;
+  let branch = rawBranch;
+
+  if (releaseMode) {
+    // base/head/branch are resolved later from the release; only owner/repo are needed up front.
+    // An explicit owner/repo@branch still overrides the target repo for cross-repo runs.
+    if (rawBranch) {
+      const branchTarget = parseBranchInput(rawBranch, owner || '', repo || '');
+      owner = branchTarget.owner;
+      repo = branchTarget.repo;
+      branch = branchTarget.branch;
+    }
+    if (!owner || !repo) {
+      throw new Error('Failed to resolve repository context (owner/repo). Ensure this runs in GitHub Actions with a valid repository context.');
+    }
+  } else {
+    baseCommit = requireInput('base-commit');
+    headCommit = requireInput('head-commit');
+    const branchTarget = parseBranchInput(requireInput('branch'), owner || '', repo || '');
+    owner = branchTarget.owner;
+    repo = branchTarget.repo;
+    branch = branchTarget.branch;
+    if (!owner || !repo) {
+      throw new Error('Failed to resolve repository context (owner/repo). Ensure this runs in GitHub Actions with a valid repository context or pass branch as owner/repo@branch.');
+    }
   }
-  const promptUrl = core.getInput('prompt-url');
-  const model = core.getInput('model') || 'gemini-3.5-flash';
+
+  const promptUrl = core.getInput('prompt-url').trim() || DEFAULT_PROMPT_URL;
+  const model = core.getInput('model').trim() || DEFAULT_MODEL;
   const maxLinkedItems = Math.max(0, Math.floor(parseNumber(core.getInput('max-linked-items') || '5', 5)));
   const maxReferenceDepth = Math.max(0, Math.floor(parseNumber(core.getInput('max-reference-depth') || '2', 2)));
   const maxItemLength = Math.max(0, Math.floor(parseNumber(core.getInput('max-item-length') || '5000', 5000)));
@@ -93,5 +126,7 @@ export function getConfig(): Config {
     maxLinkedItems,
     maxReferenceDepth,
     maxItemLength,
+    releaseMode,
+    releaseTag,
   };
 }
