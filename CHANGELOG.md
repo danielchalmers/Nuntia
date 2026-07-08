@@ -12,8 +12,6 @@ All notable changes to Nuntia are documented here. The format is based on
   target using GitHub's own previous-tag logic. Leave `release-tag` (and base/head) blank to use the
   latest published release.
 - First-release support: when there is no previous tag, notes cover the whole history up to the tag.
-- Deterministic, code-generated title + metadata header (repository, branch, range, timestamp),
-  replacing the placeholder block that the model previously had to fill in.
 
 ### Changed
 
@@ -22,7 +20,6 @@ All notable changes to Nuntia are documented here. The format is based on
 - `prompt-url` is now optional and documented as such; blank uses the built-in prompt.
 - The example workflow is now [`examples/nuntia.yml`](./examples/nuntia.yml) (renamed from
   `examples/workflows/nuntia-release-notes.yml`) and runs automatically on `release: published`.
-- The prompt template no longer emits its own title/metadata; Nuntia adds them.
 
 ### Fixed
 

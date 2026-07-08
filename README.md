@@ -68,7 +68,7 @@ Nuntia serves its prompt from a URL so you can change how notes are written **wi
 - **Fork the prompt:** copy [`examples/Nuntia.prompt`](./examples/Nuntia.prompt), host it anywhere raw (a file in your repo, a Gist, etc.), and pass its raw URL as `prompt-url`.
 - Pin `prompt-url` to a tag or commit if you want the wording to stay stable across runs.
 
-The prompt is outcome-first: it groups related work into themes, merges duplicates, and adds migration steps when users must act. Nuntia adds the `# Release Notes` title, the release metadata header, and the attribution footer itself, so a custom prompt should start at its first `##` section.
+The default prompt is outcome-first: it writes a title and summary, `Highlights`, an `Upgrading` section with migration steps when users must act, and themed `Changes by area` — grouping related work and merging duplicates rather than logging every commit. Nuntia appends its attribution footer to whatever the prompt produces.
 
 ## Versioning
 
