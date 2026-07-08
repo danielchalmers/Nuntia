@@ -18,7 +18,7 @@ Only include sections that have at least one applicable entry. Omit empty sectio
 For every entry in included sections, use this exact pattern:
 
 ### Short Title: [#123](https://github.com/owner/repo/issues/123), [#456](https://github.com/owner/repo/pull/456), [abc1234](https://github.com/owner/repo/commit/abc1234...)
-1-2 concise summary sentences of what changed.
+1-2 concise summary sentences of what changed, ending with attribution to the contributor(s) using the `author` handle from the commit or linked PR/issue (for example, "by @author").
 When possible, include a short concrete before/after usage snippet, config diff, or command output to illustrate the change.
 1-2 additional sentences with impact, edge cases, or user-facing behavior details.
 
@@ -37,8 +37,13 @@ Use the shared entry format above.
 ## 🧹 Other Changes
 Use the shared entry format above.
 
+End the notes with a footer linking the full diff (build the URL from the context):
+
+**Full Changelog:** https://github.com/{repository.owner}/{repository.repo}/compare/{range.base}...{range.head}
+
 STYLE RULES
 - Prioritize clarity and actionable language.
+- Credit contributors: attribute each entry to the author(s) of its commits and linked PRs/issues using their `author` handle (for example, "by @author"), crediting each contributor once.
 - Each entry must include at least one reference link.
 - Use commit short SHAs in the link labels, but link to the full commit URL.
 - Group related work across multiple commits/PRs into a single entry; merge duplicates and summarize the outcome once.

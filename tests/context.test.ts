@@ -346,4 +346,33 @@ describe('buildReleaseContext', () => {
     expect(context.range.totalCommits).toBe(2); // base + 1 range commit
     expect(context.range.changedFiles).toEqual(['a.ts', 'b.ts']);
   });
+
+  it('threads the linked pull/issue author into the linked item', async () => {
+    const cfg: Config = {
+      owner: 'acme', repo: 'widgets', branch: 'main',
+      baseCommit: 'a1b2c3d4', headCommit: 'a1b2c3d4',
+      token: 'token', geminiApiKey: 'gemini-key',
+      promptUrl: 'https://example.com/prompt.txt', model: 'gemini-3.1-flash-lite',
+      maxLinkedItems: 3, maxReferenceDepth: 2, maxItemLength: 5000,
+    };
+
+    const gh = {
+      compareCommits: vi.fn().mockResolvedValue({
+        commits: [], status: 'identical', totalCommits: 0, files: [], filesTruncated: false, commitsTruncated: false,
+      }),
+      getCommit: vi.fn().mockResolvedValue({
+        sha: 'a1b2c3d4e5f6', message: 'Fix the thing (#57)',
+        url: 'https://github.com/acme/widgets/commit/a1b2c3d4e5f6', author: '@dev', date: '2024-01-01T00:00:00Z',
+      }),
+      getIssueOrPullRequest: vi.fn().mockResolvedValue({
+        number: 57, title: 'Fix the thing', body: 'details', url: 'https://github.com/acme/widgets/pull/57',
+        state: 'closed', labels: [], author: '@octocat', type: 'pull', owner: 'acme', repo: 'widgets',
+      }),
+    } as unknown as GitHubClient;
+
+    const context = await buildReleaseContext(cfg, gh);
+
+    expect(context.linkedItems[0]?.type).toBe('pull');
+    expect(context.linkedItems[0]?.author).toBe('@octocat');
+  });
 });

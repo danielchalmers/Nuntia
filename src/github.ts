@@ -17,6 +17,7 @@ export type IssueOrPullDetails = {
   url: string;
   state: string;
   labels: string[];
+  author: string;
   type: 'issue' | 'pull';
   owner: string;
   repo: string;
@@ -283,6 +284,7 @@ export class GitHubClient {
       issue_number: issueNumber,
     });
 
+    const login = data.user?.login || '';
     return {
       number: data.number,
       title: data.title || '',
@@ -290,6 +292,7 @@ export class GitHubClient {
       url: data.html_url || '',
       state: data.state || 'open',
       labels: this.mapLabels(data),
+      author: login ? `@${login}` : '',
       type: data.pull_request ? 'pull' : 'issue',
       owner,
       repo,

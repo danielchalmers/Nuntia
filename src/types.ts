@@ -48,6 +48,7 @@ export type LinkedItem = {
   url?: string;
   state?: string;
   labels?: string[];
+  author?: string;
   referencedBy: string[];
   references?: ReferenceSummary;
 };

@@ -229,3 +229,34 @@ describe('GitHubClient.compareCommits', () => {
     expect(result.commitsTruncated).toBe(false);
   });
 });
+
+describe('GitHubClient.getIssueOrPullRequest', () => {
+  it('captures and @-prefixes the author login', async () => {
+    const get = vi.fn().mockResolvedValue({
+      data: {
+        number: 57, title: 'A pull request', body: 'body', html_url: 'https://github.com/acme/widgets/pull/57',
+        state: 'closed', labels: [], user: { login: 'octocat' }, pull_request: { url: 'x' },
+      },
+    });
+    const client = new GitHubClient('token', 'acme', 'widgets') as any;
+    client.octokit = { rest: { issues: { get } } };
+
+    const details = await client.getIssueOrPullRequest('acme', 'widgets', 57);
+
+    expect(details.author).toBe('@octocat');
+    expect(details.type).toBe('pull');
+  });
+
+  it('returns an empty author when the response has no user', async () => {
+    const get = vi.fn().mockResolvedValue({
+      data: { number: 5, title: 'An issue', body: '', html_url: '', state: 'open', labels: [] },
+    });
+    const client = new GitHubClient('token', 'acme', 'widgets') as any;
+    client.octokit = { rest: { issues: { get } } };
+
+    const details = await client.getIssueOrPullRequest('acme', 'widgets', 5);
+
+    expect(details.author).toBe('');
+    expect(details.type).toBe('issue');
+  });
+});

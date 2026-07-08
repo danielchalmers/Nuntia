@@ -48,7 +48,7 @@ function toLinkedCommit(
   source: string,
   message: string
 ): LinkedItem {
-  return {
+  const item: LinkedItem = {
     type: 'commit',
     owner,
     repo,
@@ -57,10 +57,12 @@ function toLinkedCommit(
     url: commit.url,
     referencedBy: [source],
   };
+  if (commit.author && commit.author !== 'unknown') item.author = commit.author;
+  return item;
 }
 
 function toLinkedIssue(details: IssueOrPullDetails, source: string, title: string, body: string): LinkedItem {
-  return {
+  const item: LinkedItem = {
     type: details.type === 'pull' ? 'pull' : 'issue',
     owner: details.owner,
     repo: details.repo,
@@ -72,6 +74,8 @@ function toLinkedIssue(details: IssueOrPullDetails, source: string, title: strin
     labels: details.labels,
     referencedBy: [source],
   };
+  if (details.author) item.author = details.author;
+  return item;
 }
 
 function formatSource(ref: Reference): string {
