@@ -41,6 +41,13 @@ async function run(): Promise<void> {
   writeTextFile('artifacts/nuntia-context.json', JSON.stringify(context, null, 2));
   console.log('Wrote release notes and debug artifacts to the artifacts/ directory. Upload them from your workflow (e.g. actions/upload-artifact with path: artifacts).');
 
+  // Surface the notes in the workflow run summary so they render in the Actions UI without downloading the artifact.
+  // Guard on GITHUB_STEP_SUMMARY so local, CLI, and test runs (where the runner variable is absent) don't throw.
+  if (process.env.GITHUB_STEP_SUMMARY) {
+    await core.summary.addRaw(outputText).write();
+    console.log('Wrote release notes to the workflow run summary.');
+  }
+
   core.setOutput('release-notes-path', outputPath);
   core.setOutput('input-tokens', String(inputTokens));
   core.setOutput('output-tokens', String(outputTokens));
