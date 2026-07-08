@@ -1,7 +1,16 @@
 import { describe, it, expect, vi } from 'vitest';
+import * as core from '@actions/core';
 import { buildReleaseContext } from '../src/context';
 import type { GitHubClient } from '../src/github';
 import type { Config } from '../src/types';
+
+// Mock @actions/core so warnings raised during tests (e.g. the changed-file truncation path) are
+// captured as spies instead of being written to stdout as `::warning::` workflow commands, which the
+// GitHub Actions runner would otherwise surface as spurious annotations on the test job.
+vi.mock('@actions/core', async (importActual) => {
+  const actual = await importActual<typeof import('@actions/core')>();
+  return { ...actual, warning: vi.fn() };
+});
 
 describe('buildReleaseContext', () => {
   it('includes issue labels in linked item metadata', async () => {
@@ -341,9 +350,13 @@ describe('buildReleaseContext', () => {
       getIssueOrPullRequest: vi.fn(),
     } as unknown as GitHubClient;
 
+    vi.mocked(core.warning).mockClear();
+
     // The commit range is complete, so a capped file list must not abort the run.
     const context = await buildReleaseContext(cfg, gh);
     expect(context.range.totalCommits).toBe(2); // base + 1 range commit
     expect(context.range.changedFiles).toEqual(['a.ts', 'b.ts']);
+    // The truncation must surface as a warning (captured by the mock, not leaked to stdout).
+    expect(core.warning).toHaveBeenCalledWith(expect.stringMatching(/300-file compare cap/));
   });
 });
