@@ -229,3 +229,39 @@ describe('GitHubClient.compareCommits', () => {
     expect(result.commitsTruncated).toBe(false);
   });
 });
+
+describe('GitHubClient.getIssueOrPullRequest', () => {
+  function clientReturning(data: any) {
+    const get = vi.fn().mockResolvedValue({ data });
+    const client = new GitHubClient('token', 'acme', 'widgets') as any;
+    client.octokit = { rest: { issues: { get } } };
+    return client;
+  }
+
+  it('reports a merged pull request as state "merged"', async () => {
+    // The issues endpoint reports a merged PR with state 'closed'; merged_at is what marks it as shipped.
+    const client = clientReturning({
+      number: 57,
+      html_url: 'https://github.com/acme/widgets/pull/57',
+      state: 'closed',
+      pull_request: { merged_at: '2024-01-02T00:00:00Z' },
+    });
+
+    const details = await client.getIssueOrPullRequest('acme', 'widgets', 57);
+
+    expect(details.state).toBe('merged');
+  });
+
+  it('keeps a pull request closed without merging as state "closed"', async () => {
+    const client = clientReturning({
+      number: 58,
+      html_url: 'https://github.com/acme/widgets/pull/58',
+      state: 'closed',
+      pull_request: { merged_at: null },
+    });
+
+    const details = await client.getIssueOrPullRequest('acme', 'widgets', 58);
+
+    expect(details.state).toBe('closed');
+  });
+});
