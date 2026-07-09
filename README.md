@@ -82,7 +82,3 @@ jobs:
 | `release-notes-path` | Filesystem path to the release notes markdown. |
 | `input-tokens` | Gemini prompt token count. |
 | `output-tokens` | Gemini output token count. |
-
-## License
-
-[MIT](./LICENSE)
