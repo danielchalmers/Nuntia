@@ -43,6 +43,7 @@ Do not add a Contributors section or a "Full Changelog" link — GitHub's auto-g
 OUTCOME-FIRST RULES (mandatory)
 - Merge, don't log. When several commits or pull requests produced ONE capability, combine them into a single bullet and cluster their references; summarize the outcome once. (A feature that landed across three pull requests is one bullet citing all three.)
 - Nullify reverts. If work was added and then reverted within the range — a "Revert ..." commit, or a change and its revert both present — OMIT it entirely; it did not ship.
+- Merged means shipped. A linked pull request ships only when its `state` is `merged`; one that is `open` or `closed` (closed without merging) did NOT land, so don't describe it as a delivered change — cite the delivering commit's SHA instead.
 - Do not attribute authors anywhere — no inline "by @author" in Highlights, Upgrading, or the change list, and no Contributors section (GitHub credits contributors automatically).
 - Use linked issue and pull-request labels to place changes in the right area and to identify breaking changes.
 - Prefer concrete before/after code for anything users must change, and keep that code in Upgrading.

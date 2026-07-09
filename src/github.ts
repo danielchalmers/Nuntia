@@ -288,7 +288,8 @@ export class GitHubClient {
       title: data.title || '',
       body: data.body || '',
       url: data.html_url || '',
-      state: data.state || 'open',
+      // The issues endpoint reports a merged PR as 'closed' too; pull_request.merged_at distinguishes it from one closed without merging so unmerged PRs aren't described as shipped.
+      state: data.pull_request?.merged_at ? 'merged' : data.state || 'open',
       labels: this.mapLabels(data),
       type: data.pull_request ? 'pull' : 'issue',
       owner,
