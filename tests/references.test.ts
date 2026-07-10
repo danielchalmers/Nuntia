@@ -16,15 +16,34 @@ Commit: https://github.com/acme/widgets/commit/abcdef1234567890abcdef1234567890a
 Also mentioned: deadbeef1
 `;
 
-    const refs = extractReferences(text, 'acme', 'widgets');
+    const knownCommits = new Set(['deadbeef1234567890deadbeef1234567890dead']);
+    const refs = extractReferences(text, 'acme', 'widgets', knownCommits);
     expect(toKeys(refs)).toEqual([
       'commit:acme/widgets#abcdef1234567890abcdef1234567890abcdef12',
-      'commit:acme/widgets#deadbeef1',
+      'commit:acme/widgets#deadbeef1234567890deadbeef1234567890dead',
       'issue:acme/widgets#12',
       'issue:acme/widgets#34',
       'issue:acme/widgets#78',
       'pull:acme/widgets#56',
     ]);
+  });
+
+  it('drops bare short SHAs that do not match a known commit', () => {
+    const text = 'Bump lockfile hash abc123def456, mention deadbeef and keep 0123456789abcdef0123456789abcdef01234567';
+    const refs = extractReferences(text, 'acme', 'widgets', new Set(['fedcba9876543210fedcba9876543210fedcba98']));
+    expect(toKeys(refs)).toEqual([
+      'commit:acme/widgets#0123456789abcdef0123456789abcdef01234567',
+    ]);
+  });
+
+  it('keeps explicit commit URLs even when the SHA is short and unknown', () => {
+    const refs = extractReferences(
+      'See https://github.com/acme/widgets/commit/deadbee for details',
+      'acme',
+      'widgets',
+      new Set()
+    );
+    expect(toKeys(refs)).toEqual(['commit:acme/widgets#deadbee']);
   });
 
   it('summarizes references into categories', () => {

@@ -13,11 +13,23 @@ function normalizeSha(sha: string): string {
   return sha.trim().toLowerCase();
 }
 
+function resolveKnownSha(prefix: string, knownCommits: ReadonlySet<string>): string | undefined {
+  for (const sha of knownCommits) {
+    if (sha.startsWith(prefix)) return sha;
+  }
+  return undefined;
+}
+
 export function referenceKey(ref: Reference): string {
   return `${ref.type}:${ref.owner}/${ref.repo}#${ref.id}`;
 }
 
-export function extractReferences(text: string, defaultOwner: string, defaultRepo: string): Reference[] {
+export function extractReferences(
+  text: string,
+  defaultOwner: string,
+  defaultRepo: string,
+  knownCommits: ReadonlySet<string> = new Set()
+): Reference[] {
   const refs: Reference[] = [];
   const seenCommits = new Set<string>();
   const issueOrPullIndex = new Map<string, number>();
@@ -136,8 +148,16 @@ export function extractReferences(text: string, defaultOwner: string, defaultRep
   const scrubbedText = text.replace(COMMIT_URL, ' ');
   COMMIT_SHA.lastIndex = 0;
   while ((match = COMMIT_SHA.exec(scrubbedText)) !== null) {
-    const sha = normalizeSha(match[0]);
+    let sha = normalizeSha(match[0]);
     if (!/[a-f]/i.test(sha)) continue;
+    // A bare short hex run is only trusted when it resolves to a commit already in the
+    // release range; anything else (lockfile hashes, "deadbeef", etc.) is noise that
+    // would otherwise trigger a 404 lookup. Full 40-char SHAs are unambiguous and kept.
+    if (sha.length < 40) {
+      const resolved = resolveKnownSha(sha, knownCommits);
+      if (!resolved) continue;
+      sha = resolved;
+    }
     addRef({
       type: 'commit',
       owner: defaultOwner,

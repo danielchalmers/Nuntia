@@ -134,7 +134,7 @@ export async function buildReleaseContext(cfg: Config, gh: GitHubClient): Promis
 
   for (const commit of commits) {
     const cleanedMessage = sanitizeCommitMessage(commit.message);
-    const refs = extractReferences(cleanedMessage, cfg.owner, cfg.repo).map(ref =>
+    const refs = extractReferences(cleanedMessage, cfg.owner, cfg.repo, knownCommits).map(ref =>
       normalizeCommitReference(ref, knownCommits)
     );
     const commitInfo = toCommitInfo(commit, refs, cleanedMessage);
@@ -188,7 +188,7 @@ export async function buildReleaseContext(cfg: Config, gh: GitHubClient): Promis
         knownCommits.add(commitDetails.sha.toLowerCase());
         const cleanedMessage = sanitizeCommitMessage(commitDetails.message);
         const linkedCommit = toLinkedCommit(commitDetails, normalizedRef.owner, normalizedRef.repo, item.source, cleanedMessage);
-        const refs = extractReferences(cleanedMessage, normalizedRef.owner, normalizedRef.repo)
+        const refs = extractReferences(cleanedMessage, normalizedRef.owner, normalizedRef.repo, knownCommits)
           .map(ref => normalizeCommitReference(ref, knownCommits));
         linkedCommit.references = summarizeReferences(refs);
         linkedItems.set(fullKey, linkedCommit);
@@ -218,7 +218,7 @@ export async function buildReleaseContext(cfg: Config, gh: GitHubClient): Promis
         const cleanedTitle = sanitizeLinkedText(details.title || '');
         const cleanedBody = sanitizeLinkedText(details.body || '');
         const linkedIssue = toLinkedIssue(details, item.source, cleanedTitle, cleanedBody);
-        const refs = extractReferences(`${cleanedTitle}\n\n${cleanedBody}`, normalizedRef.owner, normalizedRef.repo)
+        const refs = extractReferences(`${cleanedTitle}\n\n${cleanedBody}`, normalizedRef.owner, normalizedRef.repo, knownCommits)
           .map(ref => normalizeCommitReference(ref, knownCommits));
         linkedIssue.references = summarizeReferences(refs);
         linkedItems.set(resolvedKey, linkedIssue);
