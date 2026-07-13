@@ -36,7 +36,9 @@ export function getConfig(): Config {
   // The release that triggered the run is the single source of truth for the range: its tag is
   // the head, its target_commitish is the branch, and the previous release (resolved in index.ts)
   // is the base. Nothing to wire in the workflow.
-  const release = (github.context.payload as { release?: { tag_name?: unknown; target_commitish?: unknown } }).release;
+  const release = (github.context.payload as {
+    release?: { tag_name?: unknown; target_commitish?: unknown; published_at?: unknown; prerelease?: unknown };
+  }).release;
   const releaseTag = typeof release?.tag_name === 'string' ? release.tag_name.trim() : '';
   if (!releaseTag) {
     throw new Error(
@@ -44,6 +46,8 @@ export function getConfig(): Config {
     );
   }
   const branch = typeof release?.target_commitish === 'string' ? release.target_commitish : '';
+  const releasePublishedAt = typeof release?.published_at === 'string' ? release.published_at : '';
+  const releasePrerelease = Boolean(release?.prerelease);
 
   if (!owner || !repo) {
     throw new Error('Failed to resolve repository context (owner/repo). Ensure this runs in GitHub Actions with a valid repository context.');
@@ -60,6 +64,8 @@ export function getConfig(): Config {
     repo,
     branch,
     releaseTag,
+    releasePublishedAt,
+    releasePrerelease,
     baseCommit: '',
     headCommit: releaseTag,
     token,

@@ -10,6 +10,13 @@ export type CommitDetails = {
   date: string;
 };
 
+export type ReleaseSummary = {
+  tagName: string;
+  publishedAt: string;
+  prerelease: boolean;
+  draft: boolean;
+};
+
 export type IssueOrPullDetails = {
   number: number;
   title: string;
@@ -266,28 +273,35 @@ export class GitHubClient {
   }
 
   /**
-   * Generate GitHub's own draft notes for `tag` and return the body. Used only to recover the
-   * previous release tag from the Full Changelog link — the notes themselves are discarded.
+   * List the repository's releases (a read-only lookup, unlike the generate-notes API which
+   * requires write access). Paginated newest-first by GitHub's default ordering, but callers must
+   * not rely on that order — it is not guaranteed. Capped at 1000 releases; the previous release
+   * is expected within the first pages regardless of ordering quirks.
    */
-  async generateReleaseNotes(tag: string): Promise<string> {
-    this.incrementApiCalls();
-    try {
-      const { data } = await this.octokit.rest.repos.generateReleaseNotes({
+  async listReleases(): Promise<ReleaseSummary[]> {
+    const perPage = 100;
+    const maxPages = 10;
+    const releases: ReleaseSummary[] = [];
+    for (let page = 1; page <= maxPages; page++) {
+      this.incrementApiCalls();
+      const { data } = await this.octokit.rest.repos.listReleases({
         owner: this.owner,
         repo: this.repo,
-        tag_name: tag,
+        per_page: perPage,
+        page,
       });
-      return typeof (data as any)?.body === 'string' ? (data as any).body : '';
-    } catch (error: any) {
-      // The generate-notes endpoint sits under release creation, so GitHub requires contents: write
-      // even though Nuntia only reads the result. Translate the opaque 403 into the fix.
-      if (error?.status === 403) {
-        throw new Error(
-          "GitHub refused the generate-notes request used to find the previous release (403). Grant the workflow `permissions: contents: write` — Nuntia never writes anything, but GitHub requires write access for this endpoint."
-        );
+      const pageReleases = Array.isArray(data) ? data : [];
+      for (const release of pageReleases) {
+        releases.push({
+          tagName: typeof release?.tag_name === 'string' ? release.tag_name : '',
+          publishedAt: typeof release?.published_at === 'string' ? release.published_at : '',
+          prerelease: Boolean(release?.prerelease),
+          draft: Boolean(release?.draft),
+        });
       }
-      throw error;
+      if (pageReleases.length < perPage) break;
     }
+    return releases;
   }
 
   async getCommit(owner: string, repo: string, ref: string): Promise<CommitDetails> {

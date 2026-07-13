@@ -18,6 +18,8 @@ function makeConfig(overrides: Partial<Config> = {}): Config {
     repo: 'widgets',
     branch: 'main',
     releaseTag: 'v1.1.0',
+    releasePublishedAt: '2026-06-01T00:00:00Z',
+    releasePrerelease: false,
     baseCommit: 'v1.0.0',
     headCommit: 'v1.1.0',
     token: 'token',

@@ -8,9 +8,7 @@ jobs:
   release-notes:
     runs-on: ubuntu-latest
     permissions:
-      # contents: write is required by GitHub's generate-notes API, which Nuntia uses to find the
-      # previous release. Nuntia itself never writes anything — not even your release.
-      contents: write
+      contents: read
       issues: read
       pull-requests: read
     steps:

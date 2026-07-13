@@ -24,7 +24,7 @@ jobs:
   release-notes:
     runs-on: ubuntu-latest
     permissions:
-      contents: write  # required by GitHub's generate-notes API; Nuntia never writes anything
+      contents: read
       issues: read
       pull-requests: read
     steps:
@@ -46,7 +46,7 @@ Don't like the result? Re-run the job from the Actions tab and it regenerates th
 
 ## How it works
 
-- When a release is published, Nuntia asks GitHub which release came before it (the same logic that fills GitHub's auto-generated notes) and resolves the commit range between the two.
+- When a release is published, Nuntia looks at your repository's releases to find the one published before it (skipping prereleases for stable releases) and resolves the commit range between the two. Everything is read-only — it never writes to your repository or edits your release.
 - It scrapes the commit messages in that range and follows linked issues, PRs, and commits, with configurable depth and caps.
 - It sends the aggregated context to Gemini using the prompt fetched from `prompt-url`.
 - It writes the release notes markdown (plus payload/context debug files) to the `artifacts/` directory and the workflow run summary.

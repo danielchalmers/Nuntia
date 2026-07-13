@@ -15,9 +15,13 @@ async function run(): Promise<void> {
   // Fetch the prompt first so a bad prompt-url fails in ~1s instead of after the full commit walk.
   const promptText = await fetchPrompt(cfg.promptUrl);
 
-  // Ask GitHub which release came before this one and diff against it. The head and branch
+  // Find the release that came before this one and diff against it. The head and branch
   // already come from the release event (resolved in getConfig).
-  const { base, isFirstRelease } = await resolvePreviousTag(gh, cfg.releaseTag);
+  const { base, isFirstRelease } = await resolvePreviousTag(gh, {
+    tagName: cfg.releaseTag,
+    publishedAt: cfg.releasePublishedAt,
+    prerelease: cfg.releasePrerelease,
+  });
   if (isFirstRelease) {
     const message = `First release ${cfg.releaseTag}: no previous release to compare against, so there is nothing to summarize.`;
     console.log(message);

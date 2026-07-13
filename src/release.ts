@@ -1,34 +1,50 @@
-import type { GitHubClient } from './github';
+import type { GitHubClient, ReleaseSummary } from './github';
 
-// Matches the compare/first-release link GitHub appends to generated notes:
-//   **Full Changelog**: https://github.com/o/r/compare/v1.0.0...v1.1.0
-//   **Full Changelog**: https://github.com/o/r/commits/v1.0.0   (first release, no previous tag)
-// Tag names contain single dots; the base/head separator is a literal "..." so the non-greedy
-// base capture stops at the first three-dot run.
-const COMPARE_LINK = /\/compare\/(.+?)\.\.\.([^\s)]+)/;
-const COMMITS_LINK = /\/commits\/([^\s)]+)/;
+export type CurrentRelease = {
+  tagName: string;
+  publishedAt: string;
+  prerelease: boolean;
+};
 
 /**
- * Recover the previous release tag from GitHub's generated-notes body.
- * Returns an empty base and isFirstRelease when there is no previous release to diff against.
+ * Pick the release that came before `current`: the latest non-draft release published strictly
+ * before it. Stable releases compare against stable releases (prereleases are skipped, matching
+ * GitHub's own previous-tag behavior), falling back to prereleases when no stable release exists.
+ * The list order is irrelevant — GitHub does not guarantee it — because publish dates are compared
+ * explicitly. Returns an empty string when there is no previous release.
  */
-export function parseRangeFromNotes(body: string): { base: string; isFirstRelease: boolean } {
-  const compare = body.match(COMPARE_LINK);
-  if (compare && compare[1]) {
-    return { base: compare[1], isFirstRelease: false };
+export function pickPreviousTag(current: CurrentRelease, releases: ReleaseSummary[]): string {
+  const currentTime = Date.parse(current.publishedAt);
+  const candidates = releases.filter(release => {
+    if (release.draft || release.tagName === current.tagName) return false;
+    const time = Date.parse(release.publishedAt);
+    if (!Number.isFinite(time)) return false;
+    // Compare against what existed when the release was published, so re-running the job for an
+    // older release reproduces its original range instead of diffing against a newer release.
+    return Number.isFinite(currentTime) ? time < currentTime : true;
+  });
+
+  const stable = candidates.filter(release => !release.prerelease);
+  const pool = current.prerelease ? candidates : (stable.length > 0 ? stable : candidates);
+
+  let previous: ReleaseSummary | undefined;
+  for (const release of pool) {
+    if (!previous || Date.parse(release.publishedAt) > Date.parse(previous.publishedAt)) {
+      previous = release;
+    }
   }
-  if (COMMITS_LINK.test(body)) {
-    return { base: '', isFirstRelease: true };
-  }
-  // No recognizable changelog link: treat as first release rather than guess a wrong base.
-  return { base: '', isFirstRelease: true };
+  return previous?.tagName ?? '';
 }
 
 /**
- * Ask GitHub which release came before `tag`, using its own previous-tag logic (the same one that
- * fills the auto-generated release body). Returns the previous tag as the base, or a first-release flag.
+ * Resolve the previous release tag (the base of the commit range) from the repository's release
+ * list — a read-only lookup. Returns a first-release flag when nothing came before.
  */
-export async function resolvePreviousTag(gh: GitHubClient, tag: string): Promise<{ base: string; isFirstRelease: boolean }> {
-  const notes = await gh.generateReleaseNotes(tag);
-  return parseRangeFromNotes(notes);
+export async function resolvePreviousTag(
+  gh: GitHubClient,
+  current: CurrentRelease
+): Promise<{ base: string; isFirstRelease: boolean }> {
+  const releases = await gh.listReleases();
+  const base = pickPreviousTag(current, releases);
+  return base ? { base, isFirstRelease: false } : { base: '', isFirstRelease: true };
 }

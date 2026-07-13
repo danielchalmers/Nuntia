@@ -5,6 +5,10 @@ export type Config = {
   branch: string;
   /** Tag of the release that triggered the run; the head of the commit range. */
   releaseTag: string;
+  /** When the triggering release was published (ISO timestamp from the event payload). */
+  releasePublishedAt: string;
+  /** Whether the triggering release is a prerelease. */
+  releasePrerelease: boolean;
   /** Previous release tag, resolved at runtime (exclusive start of the range). Empty until resolved. */
   baseCommit: string;
   headCommit: string;

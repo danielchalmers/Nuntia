@@ -6,10 +6,8 @@ on:
   pull_request:
     branches: ["**"]
 
-# contents: write is required by GitHub's generate-notes API (used to resolve the previous
-# release); nothing in this workflow writes to the repository.
 permissions:
-  contents: write
+  contents: read
   issues: read
   pull-requests: read
 
@@ -30,16 +28,16 @@ jobs:
         run: npm run build
       - name: Verify dist/ is up to date
         run: npm run check:dist
-      # The action only runs on release events, so synthesize one whose "tag" is this CI commit.
-      # GitHub's generate-notes API accepts a not-yet-existing tag name, so the smoke test diffs
-      # the latest published release against this commit — or takes the first-release path while
-      # the repository has no published releases yet.
+      # The action only runs on release events, so synthesize one whose "tag" is this CI commit:
+      # the smoke test diffs the latest published release against this commit — or takes the
+      # first-release path while the repository has no published releases yet.
       # The bundle is invoked with `node` rather than `uses: ./` because the runner re-applies its
       # own reserved GITHUB_* variables on action steps, which would clobber the GITHUB_EVENT_PATH
       # override; inputs are passed the same way the runner does, as INPUT_* variables.
       - name: Mock release notes
         run: |
-          printf '{"release": {"tag_name": "%s", "target_commitish": "%s"}}' "$GITHUB_SHA" "$GITHUB_REF_NAME" > "$RUNNER_TEMP/release-event.json"
+          printf '{"release": {"tag_name": "%s", "target_commitish": "%s", "published_at": "%s", "prerelease": true}}' \
+            "$GITHUB_SHA" "$GITHUB_REF_NAME" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$RUNNER_TEMP/release-event.json"
           env "GITHUB_EVENT_PATH=$RUNNER_TEMP/release-event.json" \
               "INPUT_PROMPT-URL=https://raw.githubusercontent.com/danielchalmers/Nuntia/$GITHUB_SHA/examples/Nuntia.prompt" \
               "INPUT_MODEL=gemini-3.1-flash-lite" \
