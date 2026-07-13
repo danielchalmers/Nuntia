@@ -265,6 +265,20 @@ export class GitHubClient {
     return { commits: collected, reachedBase };
   }
 
+  /**
+   * Generate GitHub's own draft notes for `tag` and return the body. Used only to recover the
+   * previous release tag from the Full Changelog link — the notes themselves are discarded.
+   */
+  async generateReleaseNotes(tag: string): Promise<string> {
+    this.incrementApiCalls();
+    const { data } = await this.octokit.rest.repos.generateReleaseNotes({
+      owner: this.owner,
+      repo: this.repo,
+      tag_name: tag,
+    });
+    return typeof (data as any)?.body === 'string' ? (data as any).body : '';
+  }
+
   async getCommit(owner: string, repo: string, ref: string): Promise<CommitDetails> {
     this.incrementApiCalls();
     const { data } = await this.octokit.rest.repos.getCommit({

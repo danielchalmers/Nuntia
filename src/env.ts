@@ -7,41 +7,10 @@ function parseNumber(input: string, fallback: number): number {
   return Number.isFinite(value) ? value : fallback;
 }
 
-function requireInput(name: string): string {
-  const value = core.getInput(name);
-  if (!value) throw new Error(`Missing required input: ${name}.`);
-  return value;
-}
-
-type BranchTarget = {
-  owner: string;
-  repo: string;
-  branch: string;
-};
-
-function parseBranchInput(input: string, fallbackOwner: string, fallbackRepo: string): BranchTarget {
-  const trimmed = input.trim();
-  if (!trimmed) {
-    throw new Error('Missing required input: branch.');
-  }
-
-  const match = trimmed.match(/^([^/\s]+)\/([^@\s]+)@(.+)$/);
-  if (match && match[1] && match[2] && match[3]) {
-    const owner = match[1];
-    const repo = match[2];
-    const branch = match[3].trim();
-    if (!branch) {
-      throw new Error('Branch input uses owner/repo@branch format but branch is empty.');
-    }
-    return { owner, repo, branch };
-  }
-
-  return { owner: fallbackOwner, repo: fallbackRepo, branch: trimmed };
-}
-
 /**
- * Resolve runtime config. Throws early with actionable messages if mandatory
- * secrets (GITHUB_TOKEN, GEMINI_API_KEY) are missing or repo context is absent.
+ * Resolve runtime config from the release event that triggered the run. Throws early with
+ * actionable messages if the run wasn't triggered by a release or mandatory secrets
+ * (GITHUB_TOKEN, GEMINI_API_KEY) are missing.
  */
 export function getConfig(): Config {
   // Resolve repo context robustly
@@ -64,16 +33,22 @@ export function getConfig(): Config {
   if (!token) throw new Error('GITHUB_TOKEN missing (add: secrets.GITHUB_TOKEN).');
   if (!geminiApiKey) throw new Error('GEMINI_API_KEY missing (add it as a repository secret).');
 
-  const baseCommit = requireInput('base-commit');
-  const headCommit = requireInput('head-commit');
-  const rawBranch = requireInput('branch');
-  const branchTarget = parseBranchInput(rawBranch, owner || '', repo || '');
-  owner = branchTarget.owner;
-  repo = branchTarget.repo;
-  const branch = branchTarget.branch;
-  if (!owner || !repo) {
-    throw new Error('Failed to resolve repository context (owner/repo). Ensure this runs in GitHub Actions with a valid repository context or pass branch as owner/repo@branch.');
+  // The release that triggered the run is the single source of truth for the range: its tag is
+  // the head, its target_commitish is the branch, and the previous release (resolved in index.ts)
+  // is the base. Nothing to wire in the workflow.
+  const release = (github.context.payload as { release?: { tag_name?: unknown; target_commitish?: unknown } }).release;
+  const releaseTag = typeof release?.tag_name === 'string' ? release.tag_name.trim() : '';
+  if (!releaseTag) {
+    throw new Error(
+      'No release found in the event payload. Nuntia runs when a release is published — trigger it with `on: release: types: [published]`. To regenerate notes for a release, re-run this job from the Actions tab.'
+    );
   }
+  const branch = typeof release?.target_commitish === 'string' ? release.target_commitish : '';
+
+  if (!owner || !repo) {
+    throw new Error('Failed to resolve repository context (owner/repo). Ensure this runs in GitHub Actions with a valid repository context.');
+  }
+
   const promptUrl = core.getInput('prompt-url');
   const model = core.getInput('model') || 'gemini-3.5-flash';
   const maxLinkedItems = Math.max(0, Math.floor(parseNumber(core.getInput('max-linked-items') || '5', 5)));
@@ -84,8 +59,9 @@ export function getConfig(): Config {
     owner,
     repo,
     branch,
-    baseCommit,
-    headCommit,
+    releaseTag,
+    baseCommit: '',
+    headCommit: releaseTag,
     token,
     geminiApiKey,
     promptUrl,

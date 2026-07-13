@@ -119,14 +119,28 @@ export async function buildReleaseContext(cfg: Config, gh: GitHubClient): Promis
     cfg.baseCommit,
     cfg.headCommit
   );
-  let commits: CommitDetails[] = [];
 
-  if (cfg.baseCommit === cfg.headCommit) {
-    commits = [await gh.getCommit(cfg.owner, cfg.repo, cfg.baseCommit)];
-  } else {
-    const baseCommit = await gh.getCommit(cfg.owner, cfg.repo, cfg.baseCommit);
-    commits = [baseCommit, ...compareCommits];
+  // Guard against a reversed or empty range before generating anything. Since base/head are
+  // derived from the release, a bad inference would otherwise silently yield empty or wrong notes.
+  if (status === 'behind' || status === 'identical') {
+    throw new Error(
+      `Commit range ${cfg.baseCommit}..${cfg.headCommit} is '${status}': the release tag adds nothing on top of the previous release. Refusing to generate notes over an empty or backward range.`
+    );
   }
+  if ((totalCommits ?? compareCommits.length) === 0) {
+    throw new Error(
+      `Commit range ${cfg.baseCommit}..${cfg.headCommit} contains no commits (compare status '${status ?? 'unknown'}'). There is nothing to summarize.`
+    );
+  }
+  if (status === 'diverged') {
+    core.warning(
+      `Commit range ${cfg.baseCommit}..${cfg.headCommit} is 'diverged': the previous release is not an ancestor of this one, so the notes cover the commits since their common ancestor. Verify the generated notes.`
+    );
+  }
+
+  // The range is base-exclusive: the previous release's tag commit belongs to the previous
+  // release, so the compare result (which excludes the base) is exactly the new release's commits.
+  const commits: CommitDetails[] = compareCommits;
 
   const knownCommits = new Set(commits.map(commit => commit.sha.toLowerCase()));
   const commitEntries: CommitInfo[] = [];
@@ -240,11 +254,8 @@ export async function buildReleaseContext(cfg: Config, gh: GitHubClient): Promis
     }
   }
 
-  // Authoritative base-inclusive commit count for the range. compareCommits' total_commits is base-exclusive, so add one for the base commit itself.
-  const authoritativeTotal =
-    cfg.baseCommit === cfg.headCommit
-      ? 1
-      : (typeof totalCommits === 'number' ? totalCommits : compareCommits.length) + 1;
+  // Authoritative commit count for the (base-exclusive) range, straight from the compare API.
+  const authoritativeTotal = typeof totalCommits === 'number' ? totalCommits : compareCommits.length;
   const processedCommits = commitEntries.length;
 
   // A release-notes tool must never publish an incomplete changelog.
@@ -302,9 +313,7 @@ export async function buildReleaseContext(cfg: Config, gh: GitHubClient): Promis
   return {
     generatedAt: new Date().toISOString(),
     inputs: {
-      baseCommit: cfg.baseCommit,
-      headCommit: cfg.headCommit,
-      branch: cfg.branch,
+      releaseTag: cfg.releaseTag,
       promptUrl: cfg.promptUrl,
       model: cfg.model,
       maxLinkedItems: cfg.maxLinkedItems,

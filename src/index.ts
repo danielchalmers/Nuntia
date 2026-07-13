@@ -2,6 +2,7 @@ import * as core from '@actions/core';
 import { getConfig } from './env';
 import { GitHubClient } from './github';
 import { buildReleaseContext } from './context';
+import { resolvePreviousTag } from './release';
 import { buildPrompt, fetchPrompt } from './prompt';
 import { buildTextPayload, GeminiClient } from './gemini';
 import { writeTextFile } from './storage';
@@ -11,9 +12,30 @@ async function run(): Promise<void> {
   const gh = new GitHubClient(cfg.token, cfg.owner, cfg.repo);
   const gemini = new GeminiClient(cfg.geminiApiKey);
 
+  // Fetch the prompt first so a bad prompt-url fails in ~1s instead of after the full commit walk.
+  const promptText = await fetchPrompt(cfg.promptUrl);
+
+  // Ask GitHub which release came before this one and diff against it. The head and branch
+  // already come from the release event (resolved in getConfig).
+  const { base, isFirstRelease } = await resolvePreviousTag(gh, cfg.releaseTag);
+  if (isFirstRelease) {
+    const message = `First release ${cfg.releaseTag}: no previous release to compare against, so there is nothing to summarize.`;
+    console.log(message);
+    // Still write the notes file so workflows that upload `artifacts/` with
+    // if-no-files-found: error succeed on a repository's very first release.
+    const outputPath = writeTextFile('artifacts/nuntia-release-notes.md', `${message}\n`);
+    if (process.env.GITHUB_STEP_SUMMARY) {
+      await core.summary.addRaw(`_${message}_`).write();
+    }
+    core.setOutput('release-notes-path', outputPath);
+    return;
+  }
+  cfg.baseCommit = base;
+  console.log(`Release ${cfg.releaseTag}: summarizing changes since ${base}.`);
+
   console.log('Inputs:', {
-    baseCommit: cfg.baseCommit,
-    headCommit: cfg.headCommit,
+    releaseTag: cfg.releaseTag,
+    previousTag: cfg.baseCommit,
     branch: cfg.branch,
     promptUrl: cfg.promptUrl,
     model: cfg.model,
@@ -25,7 +47,6 @@ async function run(): Promise<void> {
   const context = await buildReleaseContext(cfg, gh);
   console.log(`Commit range resolved: ${context.range.totalCommits} commit(s), ${context.linkedItems.length} linked item(s).`);
 
-  const promptText = await fetchPrompt(cfg.promptUrl);
   const { systemPrompt, userPrompt } = buildPrompt(context, promptText);
   const payload = buildTextPayload(systemPrompt, userPrompt, cfg.model);
 

@@ -12,37 +12,45 @@ vi.mock('@actions/core', async (importActual) => {
   return { ...actual, warning: vi.fn() };
 });
 
+function makeConfig(overrides: Partial<Config> = {}): Config {
+  return {
+    owner: 'acme',
+    repo: 'widgets',
+    branch: 'main',
+    releaseTag: 'v1.1.0',
+    baseCommit: 'v1.0.0',
+    headCommit: 'v1.1.0',
+    token: 'token',
+    geminiApiKey: 'gemini-key',
+    promptUrl: 'https://example.com/prompt.txt',
+    model: 'gemini-3.1-flash-lite',
+    maxLinkedItems: 3,
+    maxReferenceDepth: 2,
+    maxItemLength: 5000,
+    ...overrides,
+  };
+}
+
 describe('buildReleaseContext', () => {
   it('includes issue labels in linked item metadata', async () => {
-    const cfg: Config = {
-      owner: 'acme',
-      repo: 'widgets',
-      branch: 'main',
-      baseCommit: 'a1b2c3d4',
-      headCommit: 'a1b2c3d4',
-      token: 'token',
-      geminiApiKey: 'gemini-key',
-      promptUrl: 'https://example.com/prompt.txt',
-      model: 'gemini-3.1-flash-lite',
-      maxLinkedItems: 3,
-      maxReferenceDepth: 2,
-      maxItemLength: 5000,
-    };
+    const cfg = makeConfig();
 
     const gh = {
       compareCommits: vi.fn().mockResolvedValue({
-        commits: [],
-        status: 'identical',
-        totalCommits: 0,
+        commits: [
+          {
+            sha: 'a1b2c3d4e5f6',
+            message: 'Fixes #42',
+            url: 'https://github.com/acme/widgets/commit/a1b2c3d4e5f6',
+            author: '@dev',
+            date: '2024-01-01T00:00:00Z',
+          },
+        ],
+        status: 'ahead',
+        totalCommits: 1,
         files: ['src/index.ts'],
       }),
-      getCommit: vi.fn().mockResolvedValue({
-        sha: 'a1b2c3d4e5f6',
-        message: 'Fixes #42',
-        url: 'https://github.com/acme/widgets/commit/a1b2c3d4e5f6',
-        author: '@dev',
-        date: '2024-01-01T00:00:00Z',
-      }),
+      getCommit: vi.fn(),
       getIssueOrPullRequest: vi.fn().mockResolvedValue({
         number: 42,
         title: 'Patch release race condition',
@@ -68,35 +76,24 @@ describe('buildReleaseContext', () => {
   });
 
   it('classifies (#123) references as pull requests and includes linked pull body', async () => {
-    const cfg: Config = {
-      owner: 'acme',
-      repo: 'widgets',
-      branch: 'main',
-      baseCommit: 'a1b2c3d4',
-      headCommit: 'a1b2c3d4',
-      token: 'token',
-      geminiApiKey: 'gemini-key',
-      promptUrl: 'https://example.com/prompt.txt',
-      model: 'gemini-3.1-flash-lite',
-      maxLinkedItems: 3,
-      maxReferenceDepth: 2,
-      maxItemLength: 5000,
-    };
+    const cfg = makeConfig();
 
     const gh = {
       compareCommits: vi.fn().mockResolvedValue({
-        commits: [],
-        status: 'identical',
-        totalCommits: 0,
+        commits: [
+          {
+            sha: 'a1b2c3d4e5f6',
+            message: 'Rename and consolidate inputs (#57)',
+            url: 'https://github.com/acme/widgets/commit/a1b2c3d4e5f6',
+            author: '@dev',
+            date: '2024-01-01T00:00:00Z',
+          },
+        ],
+        status: 'ahead',
+        totalCommits: 1,
         files: [],
       }),
-      getCommit: vi.fn().mockResolvedValue({
-        sha: 'a1b2c3d4e5f6',
-        message: 'Rename and consolidate inputs (#57)',
-        url: 'https://github.com/acme/widgets/commit/a1b2c3d4e5f6',
-        author: '@dev',
-        date: '2024-01-01T00:00:00Z',
-      }),
+      getCommit: vi.fn(),
       getIssueOrPullRequest: vi.fn().mockResolvedValue({
         number: 57,
         title: 'Rename and consolidate inputs',
@@ -122,35 +119,24 @@ describe('buildReleaseContext', () => {
   });
 
   it('keeps linked item body content present while truncating with max-item-length', async () => {
-    const cfg: Config = {
-      owner: 'acme',
-      repo: 'widgets',
-      branch: 'main',
-      baseCommit: 'a1b2c3d4',
-      headCommit: 'a1b2c3d4',
-      token: 'token',
-      geminiApiKey: 'gemini-key',
-      promptUrl: 'https://example.com/prompt.txt',
-      model: 'gemini-3.1-flash-lite',
-      maxLinkedItems: 3,
-      maxReferenceDepth: 2,
-      maxItemLength: 20,
-    };
+    const cfg = makeConfig({ maxItemLength: 20 });
 
     const gh = {
       compareCommits: vi.fn().mockResolvedValue({
-        commits: [],
-        status: 'identical',
-        totalCommits: 0,
+        commits: [
+          {
+            sha: 'a1b2c3d4e5f6',
+            message: 'Fixes #42',
+            url: 'https://github.com/acme/widgets/commit/a1b2c3d4e5f6',
+            author: '@dev',
+            date: '2024-01-01T00:00:00Z',
+          },
+        ],
+        status: 'ahead',
+        totalCommits: 1,
         files: [],
       }),
-      getCommit: vi.fn().mockResolvedValue({
-        sha: 'a1b2c3d4e5f6',
-        message: 'Fixes #42',
-        url: 'https://github.com/acme/widgets/commit/a1b2c3d4e5f6',
-        author: '@dev',
-        date: '2024-01-01T00:00:00Z',
-      }),
+      getCommit: vi.fn(),
       getIssueOrPullRequest: vi.fn().mockResolvedValue({
         number: 42,
         title: 'This title is much longer than twenty characters',
@@ -173,20 +159,7 @@ describe('buildReleaseContext', () => {
   });
 
   it('applies max-linked-items per commit instead of globally', async () => {
-    const cfg: Config = {
-      owner: 'acme',
-      repo: 'widgets',
-      branch: 'main',
-      baseCommit: 'base1234',
-      headCommit: 'head5678',
-      token: 'token',
-      geminiApiKey: 'gemini-key',
-      promptUrl: 'https://example.com/prompt.txt',
-      model: 'gemini-3.1-flash-lite',
-      maxLinkedItems: 1,
-      maxReferenceDepth: 2,
-      maxItemLength: 5000,
-    };
+    const cfg = makeConfig({ maxLinkedItems: 1 });
 
     const getIssueOrPullRequest = vi.fn().mockImplementation(async (_owner: string, _repo: string, number: number) => {
       if (number === 40) {
@@ -219,6 +192,13 @@ describe('buildReleaseContext', () => {
       compareCommits: vi.fn().mockResolvedValue({
         commits: [
           {
+            sha: 'base1234',
+            message: 'Initial change (#40)',
+            url: 'https://github.com/acme/widgets/commit/base1234',
+            author: '@dev',
+            date: '2024-01-01T00:00:00Z',
+          },
+          {
             sha: 'head5678',
             message: 'Follow-up change (#57)',
             url: 'https://github.com/acme/widgets/commit/head5678',
@@ -227,16 +207,10 @@ describe('buildReleaseContext', () => {
           },
         ],
         status: 'ahead',
-        totalCommits: 1,
+        totalCommits: 2,
         files: [],
       }),
-      getCommit: vi.fn().mockResolvedValue({
-        sha: 'base1234',
-        message: 'Initial change (#40)',
-        url: 'https://github.com/acme/widgets/commit/base1234',
-        author: '@dev',
-        date: '2024-01-01T00:00:00Z',
-      }),
+      getCommit: vi.fn(),
       getIssueOrPullRequest,
     } as unknown as GitHubClient;
 
@@ -249,20 +223,7 @@ describe('buildReleaseContext', () => {
   });
 
   it('throws instead of producing notes when the commit range is incomplete', async () => {
-    const cfg: Config = {
-      owner: 'acme',
-      repo: 'widgets',
-      branch: 'main',
-      baseCommit: 'base1',
-      headCommit: 'head1',
-      token: 'token',
-      geminiApiKey: 'gemini-key',
-      promptUrl: 'https://example.com/prompt.txt',
-      model: 'gemini-3.1-flash-lite',
-      maxLinkedItems: 0,
-      maxReferenceDepth: 2,
-      maxItemLength: 5000,
-    };
+    const cfg = makeConfig({ maxLinkedItems: 0 });
 
     const gh = {
       // Simulate a range whose commits could not be fully recovered.
@@ -274,13 +235,7 @@ describe('buildReleaseContext', () => {
         filesTruncated: false,
         commitsTruncated: false,
       }),
-      getCommit: vi.fn().mockResolvedValue({
-        sha: 'base1full',
-        message: 'Base commit',
-        url: 'https://github.com/acme/widgets/commit/base1full',
-        author: '@dev',
-        date: '2024-01-01T00:00:00Z',
-      }),
+      getCommit: vi.fn(),
       getIssueOrPullRequest: vi.fn(),
     } as unknown as GitHubClient;
 
@@ -288,13 +243,7 @@ describe('buildReleaseContext', () => {
   });
 
   it('throws when the recovery is unverified even if the counts match', async () => {
-    const cfg: Config = {
-      owner: 'acme', repo: 'widgets', branch: 'main',
-      baseCommit: 'base1', headCommit: 'head1',
-      token: 'token', geminiApiKey: 'gemini-key',
-      promptUrl: 'https://example.com/prompt.txt', model: 'gemini-3.1-flash-lite',
-      maxLinkedItems: 0, maxReferenceDepth: 2, maxItemLength: 5000,
-    };
+    const cfg = makeConfig({ maxLinkedItems: 0 });
 
     const rangeCommits = Array.from({ length: 300 }, (_, i) => ({
       sha: `range${i}`.padEnd(40, '0'),
@@ -313,26 +262,55 @@ describe('buildReleaseContext', () => {
         filesTruncated: false,
         commitsTruncated: true, // recovery could not confirm completeness
       }),
-      getCommit: vi.fn().mockResolvedValue({
-        sha: 'base1full', message: 'Base commit',
-        url: 'https://github.com/acme/widgets/commit/base1full', author: '@dev', date: '2024-01-01T00:00:00Z',
-      }),
+      getCommit: vi.fn(),
       getIssueOrPullRequest: vi.fn(),
     } as unknown as GitHubClient;
 
-    // base + 300 range commits = 301 == authoritative total, but the client signalled
-    // the recovery was unconfirmed, so it must still abort rather than lie.
+    // All 300 range commits are present, but the client signalled the recovery was unconfirmed,
+    // so it must still abort rather than lie.
     await expect(buildReleaseContext(cfg, gh)).rejects.toThrow(/incomplete/i);
   });
 
+  it('refuses a reversed range (compare status behind)', async () => {
+    const cfg = makeConfig();
+
+    const gh = {
+      compareCommits: vi.fn().mockResolvedValue({
+        commits: [],
+        status: 'behind',
+        totalCommits: 0,
+        files: [],
+        filesTruncated: false,
+        commitsTruncated: false,
+      }),
+      getCommit: vi.fn(),
+      getIssueOrPullRequest: vi.fn(),
+    } as unknown as GitHubClient;
+
+    await expect(buildReleaseContext(cfg, gh)).rejects.toThrow(/backward/i);
+  });
+
+  it('refuses an empty range', async () => {
+    const cfg = makeConfig();
+
+    const gh = {
+      compareCommits: vi.fn().mockResolvedValue({
+        commits: [],
+        status: 'ahead',
+        totalCommits: 0,
+        files: [],
+        filesTruncated: false,
+        commitsTruncated: false,
+      }),
+      getCommit: vi.fn(),
+      getIssueOrPullRequest: vi.fn(),
+    } as unknown as GitHubClient;
+
+    await expect(buildReleaseContext(cfg, gh)).rejects.toThrow(/no commits/i);
+  });
+
   it('does not throw on a capped changed-file list (files are non-fatal)', async () => {
-    const cfg: Config = {
-      owner: 'acme', repo: 'widgets', branch: 'main',
-      baseCommit: 'base1', headCommit: 'head1',
-      token: 'token', geminiApiKey: 'gemini-key',
-      promptUrl: 'https://example.com/prompt.txt', model: 'gemini-3.1-flash-lite',
-      maxLinkedItems: 0, maxReferenceDepth: 2, maxItemLength: 5000,
-    };
+    const cfg = makeConfig({ maxLinkedItems: 0 });
 
     const gh = {
       compareCommits: vi.fn().mockResolvedValue({
@@ -343,10 +321,7 @@ describe('buildReleaseContext', () => {
         filesTruncated: true,
         commitsTruncated: false,
       }),
-      getCommit: vi.fn().mockResolvedValue({
-        sha: 'base1full', message: 'Base commit',
-        url: 'https://github.com/acme/widgets/commit/base1full', author: '@dev', date: '2024-01-01T00:00:00Z',
-      }),
+      getCommit: vi.fn(),
       getIssueOrPullRequest: vi.fn(),
     } as unknown as GitHubClient;
 
@@ -354,7 +329,7 @@ describe('buildReleaseContext', () => {
 
     // The commit range is complete, so a capped file list must not abort the run.
     const context = await buildReleaseContext(cfg, gh);
-    expect(context.range.totalCommits).toBe(2); // base + 1 range commit
+    expect(context.range.totalCommits).toBe(1);
     expect(context.range.changedFiles).toEqual(['a.ts', 'b.ts']);
     // The truncation must surface as a warning (captured by the mock, not leaked to stdout).
     expect(core.warning).toHaveBeenCalledWith(expect.stringMatching(/300-file compare cap/));

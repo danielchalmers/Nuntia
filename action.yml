@@ -1,20 +1,11 @@
 name: "Nuntia"
-description: "Generate release notes and migration guides from a commit range on demand."
+description: "Generate release notes and migration guides when a GitHub release is published."
 author: "Daniel Chalmers"
 branding:
   color: "green"
   icon: "file-text"
 
 inputs:
-  base-commit:
-    description: "Start commit SHA (inclusive) for the release notes range."
-    required: true
-  head-commit:
-    description: "End commit SHA (inclusive) for the release notes range."
-    required: true
-  branch:
-    description: "Branch name associated with the release notes."
-    required: true
   prompt-url:
     description: "URL for prompt template."
     required: true

@@ -6,9 +6,7 @@ describe('buildPrompt', () => {
   const context: ReleaseContext = {
     generatedAt: '2024-01-01T00:00:00.000Z',
     inputs: {
-      baseCommit: 'a1b2c3d',
-      headCommit: 'd4e5f6g',
-      branch: 'main',
+      releaseTag: 'd4e5f6g',
       promptUrl: 'https://example.com/prompt.txt',
       model: 'gemini-3.1-flash-lite',
       maxLinkedItems: 3,

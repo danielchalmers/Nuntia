@@ -1,7 +1,11 @@
 export type Config = {
   owner: string;
   repo: string;
+  /** Branch the release targets (the release's target_commitish). */
   branch: string;
+  /** Tag of the release that triggered the run; the head of the commit range. */
+  releaseTag: string;
+  /** Previous release tag, resolved at runtime (exclusive start of the range). Empty until resolved. */
   baseCommit: string;
   headCommit: string;
   token: string;
@@ -55,9 +59,7 @@ export type LinkedItem = {
 export type ReleaseContext = {
   generatedAt: string;
   inputs: {
-    baseCommit: string;
-    headCommit: string;
-    branch: string;
+    releaseTag: string;
     promptUrl: string;
     model: string;
     maxLinkedItems: number;

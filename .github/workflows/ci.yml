@@ -28,15 +28,20 @@ jobs:
         run: npm run build
       - name: Verify dist/ is up to date
         run: npm run check:dist
+      # The action only runs on release events, so synthesize one whose "tag" is this CI commit.
+      # GitHub's generate-notes API accepts a not-yet-existing tag name, so the smoke test diffs
+      # the latest published release against this commit — or takes the first-release path while
+      # the repository has no published releases yet.
+      - name: Synthesize a release event
+        run: |
+          printf '{"release": {"tag_name": "%s", "target_commitish": "%s"}}' "$GITHUB_SHA" "$GITHUB_REF_NAME" > "$RUNNER_TEMP/release-event.json"
       - name: Mock release notes
         uses: ./
         with:
-          base-commit: ${{ github.sha }}
-          head-commit: ${{ github.sha }}
-          branch: ${{ github.ref_name }}
           prompt-url: "https://raw.githubusercontent.com/danielchalmers/Nuntia/${{ github.sha }}/examples/Nuntia.prompt"
           model: "gemini-3.1-flash-lite"
         env:
+          GITHUB_EVENT_PATH: ${{ runner.temp }}/release-event.json
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
       - name: Upload artifacts

@@ -4,7 +4,7 @@ This document provides comprehensive instructions for AI agents and developers w
 
 ## Project Overview
 
-Nuntia is a GitHub Action that generates release notes and migration guides from a commit range. It is built with TypeScript, requires Node.js 22+ for development, and runs on Node.js 24 in GitHub Actions.
+Nuntia is a GitHub Action that generates release notes and migration guides when a GitHub release is published. It infers the commit range by asking GitHub which release preceded the one that triggered the run. It is built with TypeScript, requires Node.js 22+ for development, and runs on Node.js 24 in GitHub Actions.
 
 ## Prerequisites
 
