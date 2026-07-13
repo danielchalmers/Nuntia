@@ -32,16 +32,17 @@ jobs:
       # GitHub's generate-notes API accepts a not-yet-existing tag name, so the smoke test diffs
       # the latest published release against this commit — or takes the first-release path while
       # the repository has no published releases yet.
-      - name: Synthesize a release event
+      # The bundle is invoked with `node` rather than `uses: ./` because the runner re-applies its
+      # own reserved GITHUB_* variables on action steps, which would clobber the GITHUB_EVENT_PATH
+      # override; inputs are passed the same way the runner does, as INPUT_* variables.
+      - name: Mock release notes
         run: |
           printf '{"release": {"tag_name": "%s", "target_commitish": "%s"}}' "$GITHUB_SHA" "$GITHUB_REF_NAME" > "$RUNNER_TEMP/release-event.json"
-      - name: Mock release notes
-        uses: ./
-        with:
-          prompt-url: "https://raw.githubusercontent.com/danielchalmers/Nuntia/${{ github.sha }}/examples/Nuntia.prompt"
-          model: "gemini-3.1-flash-lite"
+          env "GITHUB_EVENT_PATH=$RUNNER_TEMP/release-event.json" \
+              "INPUT_PROMPT-URL=https://raw.githubusercontent.com/danielchalmers/Nuntia/$GITHUB_SHA/examples/Nuntia.prompt" \
+              "INPUT_MODEL=gemini-3.1-flash-lite" \
+              node dist/index.js
         env:
-          GITHUB_EVENT_PATH: ${{ runner.temp }}/release-event.json
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
       - name: Upload artifacts
