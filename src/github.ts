@@ -271,12 +271,23 @@ export class GitHubClient {
    */
   async generateReleaseNotes(tag: string): Promise<string> {
     this.incrementApiCalls();
-    const { data } = await this.octokit.rest.repos.generateReleaseNotes({
-      owner: this.owner,
-      repo: this.repo,
-      tag_name: tag,
-    });
-    return typeof (data as any)?.body === 'string' ? (data as any).body : '';
+    try {
+      const { data } = await this.octokit.rest.repos.generateReleaseNotes({
+        owner: this.owner,
+        repo: this.repo,
+        tag_name: tag,
+      });
+      return typeof (data as any)?.body === 'string' ? (data as any).body : '';
+    } catch (error: any) {
+      // The generate-notes endpoint sits under release creation, so GitHub requires contents: write
+      // even though Nuntia only reads the result. Translate the opaque 403 into the fix.
+      if (error?.status === 403) {
+        throw new Error(
+          "GitHub refused the generate-notes request used to find the previous release (403). Grant the workflow `permissions: contents: write` — Nuntia never writes anything, but GitHub requires write access for this endpoint."
+        );
+      }
+      throw error;
+    }
   }
 
   async getCommit(owner: string, repo: string, ref: string): Promise<CommitDetails> {

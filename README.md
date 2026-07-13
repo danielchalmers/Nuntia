@@ -24,7 +24,7 @@ jobs:
   release-notes:
     runs-on: ubuntu-latest
     permissions:
-      contents: read
+      contents: write  # required by GitHub's generate-notes API; Nuntia never writes anything
       issues: read
       pull-requests: read
     steps:

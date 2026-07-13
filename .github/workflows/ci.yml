@@ -6,8 +6,10 @@ on:
   pull_request:
     branches: ["**"]
 
+# contents: write is required by GitHub's generate-notes API (used to resolve the previous
+# release); nothing in this workflow writes to the repository.
 permissions:
-  contents: read
+  contents: write
   issues: read
   pull-requests: read
 
