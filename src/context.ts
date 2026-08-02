@@ -1,5 +1,5 @@
 import * as core from '@actions/core';
-import type { CommitInfo, Config, LinkedItem, Reference, ReleaseContext } from './types';
+import type { CommitInfo, Config, LinkedItem, Reference, ReferenceType, ReleaseContext, ReleaseInputs } from './types';
 import { extractReferences, referenceKey, summarizeReferences } from './references';
 import type { CommitDetails, IssueOrPullDetails } from './github';
 import { GitHubClient } from './github';
@@ -18,16 +18,20 @@ function getErrorMessage(error: unknown): string {
 }
 
 function stripMarkdownComments(text: string): string {
-  if (!text) return text;
   return text.replace(MARKDOWN_COMMENT, '');
 }
 
-function sanitizeCommitMessage(message: string): string {
-  return stripMarkdownComments(message);
-}
-
-function sanitizeLinkedText(text: string): string {
-  return stripMarkdownComments(text);
+/**
+ * Record `source` as another referrer of an item that has already been resolved.
+ * Returns true when the item was already known, so the caller can skip resolving it again.
+ */
+function mergeReferencedBy(linkedItems: Map<string, LinkedItem>, key: string, source: string): boolean {
+  const existing = linkedItems.get(key);
+  if (!existing) return false;
+  if (!existing.referencedBy.includes(source)) {
+    existing.referencedBy.push(source);
+  }
+  return true;
 }
 
 function toCommitInfo(commit: CommitDetails, references: Reference[], message: string): CommitInfo {
@@ -74,10 +78,55 @@ function toLinkedIssue(details: IssueOrPullDetails, source: string, title: strin
   };
 }
 
-function formatSource(ref: Reference): string {
-  if (ref.type === 'commit') return `commit:${ref.id.slice(0, 7)}`;
-  if (ref.type === 'pull') return `pull:#${ref.id}`;
-  return `issue:#${ref.id}`;
+function formatSource(type: ReferenceType, id: string): string {
+  if (type === 'commit') return `commit:${id.slice(0, 7)}`;
+  if (type === 'pull') return `pull:#${id}`;
+  return `issue:#${id}`;
+}
+
+// A reference that has been fetched and turned into a linked item, ready for the shared bookkeeping tail of the walk.
+type ResolvedReference = {
+  key: string;
+  linked: LinkedItem;
+  // The text scanned to find the next depth of references.
+  referenceText: string;
+  // How this item is labelled when it appears as the referrer of something else.
+  sourceLabel: string;
+};
+
+async function resolveCommitReference(
+  gh: GitHubClient,
+  ref: Reference,
+  source: string,
+  knownCommits: Set<string>
+): Promise<ResolvedReference> {
+  const details = await gh.getCommit(ref.owner, ref.repo, ref.id);
+  // Registering the sha before references are extracted lets short SHAs in this commit's own message resolve against it.
+  knownCommits.add(details.sha.toLowerCase());
+  const message = stripMarkdownComments(details.message);
+  return {
+    key: referenceKey({ ...ref, id: details.sha.toLowerCase() }),
+    linked: toLinkedCommit(details, ref.owner, ref.repo, source, message),
+    referenceText: message,
+    sourceLabel: formatSource('commit', details.sha),
+  };
+}
+
+async function resolveIssueReference(
+  gh: GitHubClient,
+  ref: Reference,
+  source: string
+): Promise<ResolvedReference> {
+  const details = await gh.getIssueOrPullRequest(ref.owner, ref.repo, Number(ref.id));
+  const title = stripMarkdownComments(details.title || '');
+  const body = stripMarkdownComments(details.body || '');
+  const linked = toLinkedIssue(details, source, title, body);
+  return {
+    key: referenceKey({ type: details.type, owner: details.owner, repo: details.repo, id: String(details.number) }),
+    linked,
+    referenceText: `${title}\n\n${body}`,
+    sourceLabel: formatSource(linked.type, linked.id),
+  };
 }
 
 function normalizeCommitReference(ref: Reference, knownCommits: Set<string>): Reference {
@@ -97,21 +146,13 @@ function truncateText(text: string, maxLength: number): string {
   return `${text.slice(0, maxLength - 3).trimEnd()}...`;
 }
 
-function buildTitleBody(title?: string, body?: string): { title?: string; body?: string } {
-  const result: { title?: string; body?: string } = {};
-  if (typeof title === 'string') result.title = title;
-  if (typeof body === 'string') result.body = body;
-  return result;
-}
-
-function applyItemTextLimit(
-  title: string | undefined,
-  body: string | undefined,
-  maxLength: number
-): { title?: string; body?: string } {
-  const trimmedTitle = typeof title === 'string' ? truncateText(title, maxLength) : undefined;
-  const trimmedBody = typeof body === 'string' ? truncateText(body, maxLength) : undefined;
-  return buildTitleBody(trimmedTitle, trimmedBody);
+/**
+ * Echo back the non-secret inputs the run was resolved to.
+ * Field order is significant: it drives the JSON key order in the release context and the run log.
+ */
+export function releaseInputs(cfg: Config): ReleaseInputs {
+  const { baseCommit, headCommit, branch, promptUrl, model, maxLinkedItems, maxReferenceDepth, maxItemLength } = cfg;
+  return { baseCommit, headCommit, branch, promptUrl, model, maxLinkedItems, maxReferenceDepth, maxItemLength };
 }
 
 export async function buildReleaseContext(cfg: Config, gh: GitHubClient): Promise<ReleaseContext> {
@@ -133,13 +174,13 @@ export async function buildReleaseContext(cfg: Config, gh: GitHubClient): Promis
   const queue: QueueEntry[] = [];
 
   for (const commit of commits) {
-    const cleanedMessage = sanitizeCommitMessage(commit.message);
+    const cleanedMessage = stripMarkdownComments(commit.message);
     const refs = extractReferences(cleanedMessage, cfg.owner, cfg.repo, knownCommits).map(ref =>
       normalizeCommitReference(ref, knownCommits)
     );
     const commitInfo = toCommitInfo(commit, refs, cleanedMessage);
     commitEntries.push(commitInfo);
-    const source = `commit:${commitInfo.sha.slice(0, 7)}`;
+    const source = formatSource('commit', commitInfo.sha);
     for (const ref of refs) {
       queue.push({ ref, depth: 1, source, rootCommitSha: commitInfo.sha });
     }
@@ -156,83 +197,34 @@ export async function buildReleaseContext(cfg: Config, gh: GitHubClient): Promis
 
     const normalizedRef = normalizeCommitReference(item.ref, knownCommits);
     const key = referenceKey(normalizedRef);
-    if (linkedItems.has(key)) {
-      const existing = linkedItems.get(key);
-      if (existing && !existing.referencedBy.includes(item.source)) {
-        existing.referencedBy.push(item.source);
-      }
-      continue;
-    }
+    if (mergeReferencedBy(linkedItems, key, item.source)) continue;
 
     const linkedCountForRoot = linkedItemCountsByRoot.get(item.rootCommitSha) ?? 0;
     if (cfg.maxLinkedItems > 0 && linkedCountForRoot >= cfg.maxLinkedItems) {
       continue;
     }
 
+    // A commit already inside the range is context we have, so don't spend a lookup re-fetching it.
+    if (normalizedRef.type === 'commit' && knownCommits.has(normalizedRef.id.toLowerCase())) continue;
+
     try {
-      if (normalizedRef.type === 'commit') {
-        if (knownCommits.has(normalizedRef.id.toLowerCase())) continue;
-        const commitDetails = await gh.getCommit(normalizedRef.owner, normalizedRef.repo, normalizedRef.id);
-        const fullRef: Reference = {
-          ...normalizedRef,
-          id: commitDetails.sha.toLowerCase(),
-        };
-        const fullKey = referenceKey(fullRef);
-        if (linkedItems.has(fullKey)) {
-          const existing = linkedItems.get(fullKey);
-          if (existing && !existing.referencedBy.includes(item.source)) {
-            existing.referencedBy.push(item.source);
-          }
-          continue;
-        }
-        knownCommits.add(commitDetails.sha.toLowerCase());
-        const cleanedMessage = sanitizeCommitMessage(commitDetails.message);
-        const linkedCommit = toLinkedCommit(commitDetails, normalizedRef.owner, normalizedRef.repo, item.source, cleanedMessage);
-        const refs = extractReferences(cleanedMessage, normalizedRef.owner, normalizedRef.repo, knownCommits)
-          .map(ref => normalizeCommitReference(ref, knownCommits));
-        linkedCommit.references = summarizeReferences(refs);
-        linkedItems.set(fullKey, linkedCommit);
-        linkedItemCountsByRoot.set(item.rootCommitSha, linkedCountForRoot + 1);
-        if (item.depth < cfg.maxReferenceDepth) {
-          const source = formatSource({ ...fullRef, id: commitDetails.sha });
-          for (const ref of refs) {
-            queue.push({ ref, depth: item.depth + 1, source, rootCommitSha: item.rootCommitSha });
-          }
-        }
-      } else {
-        const details = await gh.getIssueOrPullRequest(normalizedRef.owner, normalizedRef.repo, Number(normalizedRef.id));
-        const resolvedRef: Reference = {
-          type: details.type,
-          owner: details.owner,
-          repo: details.repo,
-          id: String(details.number),
-        };
-        const resolvedKey = referenceKey(resolvedRef);
-        if (linkedItems.has(resolvedKey)) {
-          const existing = linkedItems.get(resolvedKey);
-          if (existing && !existing.referencedBy.includes(item.source)) {
-            existing.referencedBy.push(item.source);
-          }
-          continue;
-        }
-        const cleanedTitle = sanitizeLinkedText(details.title || '');
-        const cleanedBody = sanitizeLinkedText(details.body || '');
-        const linkedIssue = toLinkedIssue(details, item.source, cleanedTitle, cleanedBody);
-        const refs = extractReferences(`${cleanedTitle}\n\n${cleanedBody}`, normalizedRef.owner, normalizedRef.repo, knownCommits)
-          .map(ref => normalizeCommitReference(ref, knownCommits));
-        linkedIssue.references = summarizeReferences(refs);
-        linkedItems.set(resolvedKey, linkedIssue);
-        linkedItemCountsByRoot.set(item.rootCommitSha, linkedCountForRoot + 1);
-        if (item.depth < cfg.maxReferenceDepth) {
-          const source = formatSource({
-            type: linkedIssue.type,
-            owner: normalizedRef.owner,
-            repo: normalizedRef.repo,
-            id: linkedIssue.id,
-          });
-          for (const ref of refs) {
-            queue.push({ ref, depth: item.depth + 1, source, rootCommitSha: item.rootCommitSha });
-          }
+      const resolved =
+        normalizedRef.type === 'commit'
+          ? await resolveCommitReference(gh, normalizedRef, item.source, knownCommits)
+          : await resolveIssueReference(gh, normalizedRef, item.source);
+
+      // Resolving can canonicalize the reference (a short sha to a full one, an issue number to a pull), so dedupe again on the resolved key.
+      if (mergeReferencedBy(linkedItems, resolved.key, item.source)) continue;
+
+      const refs = extractReferences(resolved.referenceText, normalizedRef.owner, normalizedRef.repo, knownCommits)
+        .map(ref => normalizeCommitReference(ref, knownCommits));
+      resolved.linked.references = summarizeReferences(refs);
+      linkedItems.set(resolved.key, resolved.linked);
+      linkedItemCountsByRoot.set(item.rootCommitSha, linkedCountForRoot + 1);
+
+      if (item.depth < cfg.maxReferenceDepth) {
+        for (const ref of refs) {
+          queue.push({ ref, depth: item.depth + 1, source: resolved.sourceLabel, rootCommitSha: item.rootCommitSha });
         }
       }
     } catch (error) {
@@ -240,7 +232,8 @@ export async function buildReleaseContext(cfg: Config, gh: GitHubClient): Promis
     }
   }
 
-  // Authoritative base-inclusive commit count for the range. compareCommits' total_commits is base-exclusive, so add one for the base commit itself.
+  // Authoritative base-inclusive commit count for the range.
+  // compareCommits' total_commits is base-exclusive, so add one for the base commit itself.
   const authoritativeTotal =
     cfg.baseCommit === cfg.headCommit
       ? 1
@@ -267,10 +260,8 @@ export async function buildReleaseContext(cfg: Config, gh: GitHubClient): Promis
     head: cfg.headCommit,
     totalCommits: authoritativeTotal,
     changedFiles: files,
+    ...(status !== undefined && { status }),
   };
-  if (status !== undefined) {
-    range.status = status;
-  }
 
   const maxItemLength = cfg.maxItemLength;
 
@@ -280,37 +271,15 @@ export async function buildReleaseContext(cfg: Config, gh: GitHubClient): Promis
 
   const linkedItemsList: LinkedItem[] = Array.from(linkedItems.values()).map(item => {
     const trimmed: LinkedItem = { ...item };
-    if (trimmed.message) {
-      trimmed.message = truncateText(trimmed.message, maxItemLength);
-    }
-    if (trimmed.title || trimmed.body) {
-      const limited = applyItemTextLimit(trimmed.title, trimmed.body, maxItemLength);
-      if (typeof limited.title === 'string') {
-        trimmed.title = limited.title;
-      } else {
-        delete trimmed.title;
-      }
-      if (typeof limited.body === 'string') {
-        trimmed.body = limited.body;
-      } else {
-        delete trimmed.body;
-      }
-    }
+    if (typeof trimmed.message === 'string') trimmed.message = truncateText(trimmed.message, maxItemLength);
+    if (typeof trimmed.title === 'string') trimmed.title = truncateText(trimmed.title, maxItemLength);
+    if (typeof trimmed.body === 'string') trimmed.body = truncateText(trimmed.body, maxItemLength);
     return trimmed;
   });
 
   return {
     generatedAt: new Date().toISOString(),
-    inputs: {
-      baseCommit: cfg.baseCommit,
-      headCommit: cfg.headCommit,
-      branch: cfg.branch,
-      promptUrl: cfg.promptUrl,
-      model: cfg.model,
-      maxLinkedItems: cfg.maxLinkedItems,
-      maxReferenceDepth: cfg.maxReferenceDepth,
-      maxItemLength: cfg.maxItemLength,
-    },
+    inputs: releaseInputs(cfg),
     repository: {
       owner: cfg.owner,
       repo: cfg.repo,

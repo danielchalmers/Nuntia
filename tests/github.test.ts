@@ -23,51 +23,40 @@ function makePage(start: number, count: number) {
   return Array.from({ length: count }, (_, idx) => makeCompareCommit(start + idx));
 }
 
+// Each argument becomes one octokit response, in order, wrapped in the { data } envelope the SDK returns.
+function mockResponses(...pages: unknown[]) {
+  const fn = vi.fn();
+  for (const page of pages) fn.mockResolvedValueOnce({ data: page });
+  return fn;
+}
+
+function comparePage(total: number, mergeBase: string | undefined, commits: unknown[], files: unknown[] = []) {
+  return {
+    status: 'ahead',
+    total_commits: total,
+    ...(mergeBase !== undefined && { merge_base_commit: { sha: mergeBase } }),
+    commits,
+    files,
+  };
+}
+
+// GitHubClient builds a real octokit in its constructor, so swap in a stub of just the endpoints under test.
+function makeClient(rest: Record<string, unknown>) {
+  const client = new GitHubClient('token', 'acme', 'widgets') as any;
+  client.octokit = { rest };
+  return client;
+}
+
 describe('GitHubClient.compareCommits', () => {
   it('paginates compare results to include all commits', async () => {
-    const compareCommits = vi
-      .fn()
-      .mockResolvedValueOnce({
-        data: {
-          status: 'ahead',
-          total_commits: 306,
-          commits: makePage(0, 100),
-          files: [{ filename: 'src/index.ts' }, { filename: 'src/context.ts' }],
-        },
-      })
-      .mockResolvedValueOnce({
-        data: {
-          status: 'ahead',
-          total_commits: 306,
-          commits: makePage(100, 100),
-          files: [{ filename: 'src/context.ts' }, { filename: 'tests/context.test.ts' }],
-        },
-      })
-      .mockResolvedValueOnce({
-        data: {
-          status: 'ahead',
-          total_commits: 306,
-          commits: makePage(200, 100),
-          files: [],
-        },
-      })
-      .mockResolvedValueOnce({
-        data: {
-          status: 'ahead',
-          total_commits: 306,
-          commits: makePage(300, 6),
-        },
-      });
+    const compareCommits = mockResponses(
+      { status: 'ahead', total_commits: 306, commits: makePage(0, 100), files: [{ filename: 'src/index.ts' }, { filename: 'src/context.ts' }] },
+      { status: 'ahead', total_commits: 306, commits: makePage(100, 100), files: [{ filename: 'src/context.ts' }, { filename: 'tests/context.test.ts' }] },
+      { status: 'ahead', total_commits: 306, commits: makePage(200, 100), files: [] },
+      { status: 'ahead', total_commits: 306, commits: makePage(300, 6) }
+    );
 
-    const client = new GitHubClient('token', 'acme', 'widgets') as any;
-    client.octokit = {
-      rest: {
-        repos: {
-          compareCommits,
-        },
-      },
-    };
-
+    const client = makeClient({ repos: { compareCommits } });
     const result = await client.compareCommits('base-sha', 'head-sha');
 
     expect(compareCommits).toHaveBeenCalledTimes(4);
@@ -99,22 +88,20 @@ describe('GitHubClient.compareCommits', () => {
     const baseCommit = makeCompareCommit(100000); // a sha outside the 0..399 range
     const baseSha = baseCommit.sha;
 
-    const compareCommits = vi
-      .fn()
-      .mockResolvedValueOnce({ data: { status: 'ahead', total_commits: total, merge_base_commit: { sha: baseSha }, commits: makePage(0, 100), files: [] } })
-      .mockResolvedValueOnce({ data: { status: 'ahead', total_commits: total, merge_base_commit: { sha: baseSha }, commits: makePage(100, 100), files: [] } })
-      .mockResolvedValueOnce({ data: { status: 'ahead', total_commits: total, merge_base_commit: { sha: baseSha }, commits: makePage(200, 50), files: [] } });
+    const compareCommits = mockResponses(
+      comparePage(total, baseSha, makePage(0, 100)),
+      comparePage(total, baseSha, makePage(100, 100)),
+      comparePage(total, baseSha, makePage(200, 50))
+    );
 
     // Newest-first stream: 260 range commits (0..259), then the merge-base at index 260.
-    const listCommits = vi
-      .fn()
-      .mockResolvedValueOnce({ data: makePage(0, 100) })
-      .mockResolvedValueOnce({ data: makePage(100, 100) })
-      .mockResolvedValueOnce({ data: [...makePage(200, 60), baseCommit, ...makePage(261, 39)] });
+    const listCommits = mockResponses(
+      makePage(0, 100),
+      makePage(100, 100),
+      [...makePage(200, 60), baseCommit, ...makePage(261, 39)]
+    );
 
-    const client = new GitHubClient('token', 'acme', 'widgets') as any;
-    client.octokit = { rest: { repos: { compareCommits, listCommits } } };
-
+    const client = makeClient({ repos: { compareCommits, listCommits } });
     const result = await client.compareCommits('BASE', 'HEAD');
 
     expect(compareCommits).toHaveBeenCalledTimes(3);
@@ -130,23 +117,16 @@ describe('GitHubClient.compareCommits', () => {
 
   it('flags truncation when the merge-base is never reached in the stream', async () => {
     const total = 300;
-    const compareCommits = vi
-      .fn()
-      .mockResolvedValueOnce({ data: { status: 'ahead', total_commits: total, merge_base_commit: { sha: 'DEADBEEF' }, commits: makePage(0, 100), files: [] } })
-      .mockResolvedValueOnce({ data: { status: 'ahead', total_commits: total, merge_base_commit: { sha: 'DEADBEEF' }, commits: makePage(100, 100), files: [] } })
-      .mockResolvedValueOnce({ data: { status: 'ahead', total_commits: total, merge_base_commit: { sha: 'DEADBEEF' }, commits: makePage(200, 50), files: [] } });
+    const compareCommits = mockResponses(
+      comparePage(total, 'DEADBEEF', makePage(0, 100)),
+      comparePage(total, 'DEADBEEF', makePage(100, 100)),
+      comparePage(total, 'DEADBEEF', makePage(200, 50))
+    );
 
     // The stream never contains the merge-base sha, so the walk stops on the scan bound.
-    const listCommits = vi
-      .fn()
-      .mockResolvedValueOnce({ data: makePage(0, 100) })
-      .mockResolvedValueOnce({ data: makePage(100, 100) })
-      .mockResolvedValueOnce({ data: makePage(200, 100) })
-      .mockResolvedValueOnce({ data: makePage(300, 100) });
+    const listCommits = mockResponses(makePage(0, 100), makePage(100, 100), makePage(200, 100), makePage(300, 100));
 
-    const client = new GitHubClient('token', 'acme', 'widgets') as any;
-    client.octokit = { rest: { repos: { compareCommits, listCommits } } };
-
+    const client = makeClient({ repos: { compareCommits, listCommits } });
     const result = await client.compareCommits('BASE', 'HEAD');
 
     expect(result.commits).toHaveLength(300); // trimmed to the expected total (best effort)
@@ -155,14 +135,10 @@ describe('GitHubClient.compareCommits', () => {
 
   it('flags files truncation at the 300-file compare cap', async () => {
     const files = Array.from({ length: 300 }, (_, i) => ({ filename: `src/file${i}.ts` }));
-    const compareCommits = vi.fn().mockResolvedValueOnce({
-      data: { status: 'ahead', total_commits: 2, merge_base_commit: { sha: 'BASE' }, commits: makePage(0, 2), files },
-    });
+    const compareCommits = mockResponses(comparePage(2, 'BASE', makePage(0, 2), files));
     const listCommits = vi.fn();
 
-    const client = new GitHubClient('token', 'acme', 'widgets') as any;
-    client.octokit = { rest: { repos: { compareCommits, listCommits } } };
-
+    const client = makeClient({ repos: { compareCommits, listCommits } });
     const result = await client.compareCommits('BASE', 'HEAD');
 
     expect(result.filesTruncated).toBe(true);
@@ -177,23 +153,21 @@ describe('GitHubClient.compareCommits', () => {
     const baseCommit = makeCompareCommit(100000);
     const baseSha = baseCommit.sha;
 
-    const compareCommits = vi
-      .fn()
-      .mockResolvedValueOnce({ data: { status: 'ahead', total_commits: total, merge_base_commit: { sha: baseSha }, commits: makePage(0, 100), files: [] } })
-      .mockResolvedValueOnce({ data: { status: 'ahead', total_commits: total, merge_base_commit: { sha: baseSha }, commits: makePage(100, 100), files: [] } })
-      .mockResolvedValueOnce({ data: { status: 'ahead', total_commits: total, merge_base_commit: { sha: baseSha }, commits: makePage(200, 50), files: [] } });
+    const compareCommits = mockResponses(
+      comparePage(total, baseSha, makePage(0, 100)),
+      comparePage(total, baseSha, makePage(100, 100)),
+      comparePage(total, baseSha, makePage(200, 50))
+    );
 
     // Non-linear: 300 commits sort ahead of the merge-base by date (base at stream index 300).
-    const listCommits = vi
-      .fn()
-      .mockResolvedValueOnce({ data: makePage(0, 100) })
-      .mockResolvedValueOnce({ data: makePage(100, 100) })
-      .mockResolvedValueOnce({ data: makePage(200, 100) })
-      .mockResolvedValueOnce({ data: [baseCommit, ...makePage(301, 99)] });
+    const listCommits = mockResponses(
+      makePage(0, 100),
+      makePage(100, 100),
+      makePage(200, 100),
+      [baseCommit, ...makePage(301, 99)]
+    );
 
-    const client = new GitHubClient('token', 'acme', 'widgets') as any;
-    client.octokit = { rest: { repos: { compareCommits, listCommits } } };
-
+    const client = makeClient({ repos: { compareCommits, listCommits } });
     const result = await client.compareCommits('BASE', 'HEAD');
 
     expect(result.commits).toHaveLength(260); // capped to total_commits, not the 300 superset
@@ -204,24 +178,21 @@ describe('GitHubClient.compareCommits', () => {
   it('resolves the merge-base via getCommit when the compare response omits it', async () => {
     const total = 260;
     const baseCommit = makeCompareCommit(100000);
-    const baseSha = baseCommit.sha;
 
     // Compare response omits merge_base_commit / base_commit.
-    const compareCommits = vi
-      .fn()
-      .mockResolvedValueOnce({ data: { status: 'ahead', total_commits: total, commits: makePage(0, 100), files: [] } })
-      .mockResolvedValueOnce({ data: { status: 'ahead', total_commits: total, commits: makePage(100, 100), files: [] } })
-      .mockResolvedValueOnce({ data: { status: 'ahead', total_commits: total, commits: makePage(200, 50), files: [] } });
+    const compareCommits = mockResponses(
+      comparePage(total, undefined, makePage(0, 100)),
+      comparePage(total, undefined, makePage(100, 100)),
+      comparePage(total, undefined, makePage(200, 50))
+    );
     const getCommit = vi.fn().mockResolvedValue({ data: baseCommit }); // resolves the canonical base sha
-    const listCommits = vi
-      .fn()
-      .mockResolvedValueOnce({ data: makePage(0, 100) })
-      .mockResolvedValueOnce({ data: makePage(100, 100) })
-      .mockResolvedValueOnce({ data: [...makePage(200, 60), baseCommit, ...makePage(261, 39)] });
+    const listCommits = mockResponses(
+      makePage(0, 100),
+      makePage(100, 100),
+      [...makePage(200, 60), baseCommit, ...makePage(261, 39)]
+    );
 
-    const client = new GitHubClient('token', 'acme', 'widgets') as any;
-    client.octokit = { rest: { repos: { compareCommits, listCommits, getCommit } } };
-
+    const client = makeClient({ repos: { compareCommits, listCommits, getCommit } });
     const result = await client.compareCommits('BASE', 'HEAD');
 
     expect(getCommit).toHaveBeenCalled();
@@ -231,20 +202,17 @@ describe('GitHubClient.compareCommits', () => {
 });
 
 describe('GitHubClient.getIssueOrPullRequest', () => {
-  function clientReturning(data: any) {
-    const get = vi.fn().mockResolvedValue({ data });
-    const client = new GitHubClient('token', 'acme', 'widgets') as any;
-    client.octokit = { rest: { issues: { get } } };
-    return client;
-  }
-
   it('reports a merged pull request as state "merged"', async () => {
     // The issues endpoint reports a merged PR with state 'closed'; merged_at is what marks it as shipped.
-    const client = clientReturning({
-      number: 57,
-      html_url: 'https://github.com/acme/widgets/pull/57',
-      state: 'closed',
-      pull_request: { merged_at: '2024-01-02T00:00:00Z' },
+    const client = makeClient({
+      issues: {
+        get: mockResponses({
+          number: 57,
+          html_url: 'https://github.com/acme/widgets/pull/57',
+          state: 'closed',
+          pull_request: { merged_at: '2024-01-02T00:00:00Z' },
+        }),
+      },
     });
 
     const details = await client.getIssueOrPullRequest('acme', 'widgets', 57);
@@ -253,11 +221,15 @@ describe('GitHubClient.getIssueOrPullRequest', () => {
   });
 
   it('keeps a pull request closed without merging as state "closed"', async () => {
-    const client = clientReturning({
-      number: 58,
-      html_url: 'https://github.com/acme/widgets/pull/58',
-      state: 'closed',
-      pull_request: { merged_at: null },
+    const client = makeClient({
+      issues: {
+        get: mockResponses({
+          number: 58,
+          html_url: 'https://github.com/acme/widgets/pull/58',
+          state: 'closed',
+          pull_request: { merged_at: null },
+        }),
+      },
     });
 
     const details = await client.getIssueOrPullRequest('acme', 'widgets', 58);

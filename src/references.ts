@@ -1,4 +1,4 @@
-import type { Reference, ReferenceSummary } from './types';
+import type { Reference, ReferenceSummary, ReferenceType } from './types';
 
 const ISSUE_URL = /https?:\/\/github\.com\/([A-Za-z0-9_.-]+)\/([A-Za-z0-9_.-]+)\/(issues|pull)\/(\d+)/gi;
 const COMMIT_URL = /https?:\/\/github\.com\/([A-Za-z0-9_.-]+)\/([A-Za-z0-9_.-]+)\/commit\/([a-f0-9]{7,40})/gi;
@@ -18,6 +18,23 @@ function resolveKnownSha(prefix: string, knownCommits: ReadonlySet<string>): str
     if (sha.startsWith(prefix)) return sha;
   }
   return undefined;
+}
+
+// These patterns differ only in what they match and the reference type they imply; they always resolve against the default repo.
+const DEFAULT_REPO_PATTERNS: ReadonlyArray<readonly [RegExp, ReferenceType]> = [
+  [MERGE_PULL, 'pull'],
+  [EXPLICIT_PULL, 'pull'],
+  [SHORT_ISSUE, 'issue'],
+];
+
+/**
+ * Run `onMatch` for every match of a global pattern.
+ * lastIndex is reset first so a module-level pattern reused across calls always scans from the start.
+ */
+function eachMatch(pattern: RegExp, subject: string, onMatch: (match: RegExpExecArray) => void): void {
+  pattern.lastIndex = 0;
+  let match: RegExpExecArray | null;
+  while ((match = pattern.exec(subject)) !== null) onMatch(match);
 }
 
 export function referenceKey(ref: Reference): string {
@@ -71,100 +88,42 @@ export function extractReferences(
     });
   }
 
-  let match: RegExpExecArray | null = null;
-  ISSUE_URL.lastIndex = 0;
-  while ((match = ISSUE_URL.exec(text)) !== null) {
-    const [, owner, repo, kind, number] = match;
-    if (!owner || !repo || !number || !kind) continue;
-    addRef({
-      type: kind === 'pull' ? 'pull' : 'issue',
-      owner,
-      repo,
-      id: number,
+  eachMatch(ISSUE_URL, text, ([, owner, repo, kind, number]) => {
+    if (!owner || !repo || !number || !kind) return;
+    addRef({ type: kind === 'pull' ? 'pull' : 'issue', owner, repo, id: number });
+  });
+
+  eachMatch(COMMIT_URL, text, ([, owner, repo, sha]) => {
+    if (!owner || !repo || !sha) return;
+    addRef({ type: 'commit', owner, repo, id: normalizeSha(sha) });
+  });
+
+  eachMatch(CROSS_REPO_ISSUE, text, ([, owner, repo, number]) => {
+    if (!owner || !repo || !number) return;
+    addRef({ type: 'issue', owner, repo, id: number });
+  });
+
+  for (const [pattern, type] of DEFAULT_REPO_PATTERNS) {
+    eachMatch(pattern, text, ([, number]) => {
+      if (!number) return;
+      addRef({ type, owner: defaultOwner, repo: defaultRepo, id: number });
     });
   }
 
-  COMMIT_URL.lastIndex = 0;
-  while ((match = COMMIT_URL.exec(text)) !== null) {
-    const [, owner, repo, sha] = match;
-    if (!owner || !repo || !sha) continue;
-    addRef({
-      type: 'commit',
-      owner,
-      repo,
-      id: normalizeSha(sha),
-    });
-  }
-
-  CROSS_REPO_ISSUE.lastIndex = 0;
-  while ((match = CROSS_REPO_ISSUE.exec(text)) !== null) {
-    const [, owner, repo, number] = match;
-    if (!owner || !repo || !number) continue;
-    addRef({
-      type: 'issue',
-      owner,
-      repo,
-      id: number,
-    });
-  }
-
-  MERGE_PULL.lastIndex = 0;
-  while ((match = MERGE_PULL.exec(text)) !== null) {
-    const number = match[1];
-    if (!number) continue;
-    addRef({
-      type: 'pull',
-      owner: defaultOwner,
-      repo: defaultRepo,
-      id: number,
-    });
-  }
-
-  EXPLICIT_PULL.lastIndex = 0;
-  while ((match = EXPLICIT_PULL.exec(text)) !== null) {
-    const number = match[1];
-    if (!number) continue;
-    addRef({
-      type: 'pull',
-      owner: defaultOwner,
-      repo: defaultRepo,
-      id: number,
-    });
-  }
-
-  SHORT_ISSUE.lastIndex = 0;
-  while ((match = SHORT_ISSUE.exec(text)) !== null) {
-    const [, number] = match;
-    if (!number) continue;
-    addRef({
-      type: 'issue',
-      owner: defaultOwner,
-      repo: defaultRepo,
-      id: number,
-    });
-  }
-
-  COMMIT_URL.lastIndex = 0;
-  const scrubbedText = text.replace(COMMIT_URL, ' ');
-  COMMIT_SHA.lastIndex = 0;
-  while ((match = COMMIT_SHA.exec(scrubbedText)) !== null) {
+  // Commit URLs are blanked out first so the SHAs inside them aren't matched again here as bare hex runs.
+  eachMatch(COMMIT_SHA, text.replace(COMMIT_URL, ' '), match => {
     let sha = normalizeSha(match[0]);
-    if (!/[a-f]/i.test(sha)) continue;
-    // A bare short hex run is only trusted when it resolves to a commit already in the
-    // release range; anything else (lockfile hashes, "deadbeef", etc.) is noise that
-    // would otherwise trigger a 404 lookup. Full 40-char SHAs are unambiguous and kept.
+    if (!/[a-f]/i.test(sha)) return;
+    // A bare short hex run is only trusted when it resolves to a commit already in the release range.
+    // Anything else (lockfile hashes, "deadbeef", etc.) is noise that would otherwise trigger a 404 lookup.
+    // Full 40-char SHAs are unambiguous and kept.
     if (sha.length < 40) {
       const resolved = resolveKnownSha(sha, knownCommits);
-      if (!resolved) continue;
+      if (!resolved) return;
       sha = resolved;
     }
-    addRef({
-      type: 'commit',
-      owner: defaultOwner,
-      repo: defaultRepo,
-      id: sha,
-    });
-  }
+    addRef({ type: 'commit', owner: defaultOwner, repo: defaultRepo, id: sha });
+  });
 
   return refs;
 }

@@ -1,4 +1,4 @@
 import { config } from 'dotenv';
 
-// Load .env and .env.local if present. dotenv loads .env by default.
+// Loads .env if present, so local runs pick up GITHUB_TOKEN and GEMINI_API_KEY.
 config();

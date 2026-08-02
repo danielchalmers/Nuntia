@@ -47,10 +47,9 @@ function httpStatusOf(err: unknown): number | undefined {
 }
 
 /**
- * Decide whether an error is worth retrying and build the message shown when it is not
- * (or when retries run out). Quota/server/network problems are transient; auth, bad-model,
- * and content-block errors will fail identically on every attempt, so they fail fast with
- * a hint at the action input to fix.
+ * Decide whether an error is worth retrying, and build the message shown when it is not (or when retries run out).
+ * Quota, server, and network problems are transient.
+ * Auth, bad-model, and content-block errors fail identically on every attempt, so they fail fast with a hint at the action input to fix.
  */
 function classifyError(err: unknown, model: string): { retryable: boolean; message: string } {
   if (err instanceof GeminiResponseError) {

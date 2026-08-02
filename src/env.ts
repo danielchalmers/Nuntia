@@ -40,11 +40,10 @@ function parseBranchInput(input: string, fallbackOwner: string, fallbackRepo: st
 }
 
 /**
- * Resolve runtime config. Throws early with actionable messages if mandatory
- * secrets (GITHUB_TOKEN, GEMINI_API_KEY) are missing or repo context is absent.
+ * Resolve runtime config.
+ * Throws early with actionable messages if mandatory secrets (GITHUB_TOKEN, GEMINI_API_KEY) are missing or repo context is absent.
  */
 export function getConfig(): Config {
-  // Resolve repo context robustly
   let { owner, repo } = github.context.repo as { owner?: string; repo?: string };
   owner = owner || '';
   repo = repo || '';

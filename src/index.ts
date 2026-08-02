@@ -1,7 +1,7 @@
 import * as core from '@actions/core';
 import { getConfig } from './env';
 import { GitHubClient } from './github';
-import { buildReleaseContext } from './context';
+import { buildReleaseContext, releaseInputs } from './context';
 import { buildPrompt, fetchPrompt } from './prompt';
 import { buildTextPayload, GeminiClient } from './gemini';
 import { writeTextFile } from './storage';
@@ -11,16 +11,7 @@ async function run(): Promise<void> {
   const gh = new GitHubClient(cfg.token, cfg.owner, cfg.repo);
   const gemini = new GeminiClient(cfg.geminiApiKey);
 
-  console.log('Inputs:', {
-    baseCommit: cfg.baseCommit,
-    headCommit: cfg.headCommit,
-    branch: cfg.branch,
-    promptUrl: cfg.promptUrl,
-    model: cfg.model,
-    maxLinkedItems: cfg.maxLinkedItems,
-    maxReferenceDepth: cfg.maxReferenceDepth,
-    maxItemLength: cfg.maxItemLength,
-  });
+  console.log('Inputs:', releaseInputs(cfg));
 
   const context = await buildReleaseContext(cfg, gh);
   console.log(`Commit range resolved: ${context.range.totalCommits} commit(s), ${context.linkedItems.length} linked item(s).`);
