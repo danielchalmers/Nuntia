@@ -186,30 +186,18 @@ export class GitHubClient {
     // The compare endpoint also caps the changed-file list at 300 entries.
     const filesTruncated = files.length >= 300;
 
-    const result: {
-      commits: CommitDetails[];
-      status?: string;
-      totalCommits?: number;
-      files: string[];
-      filesTruncated: boolean;
-      commitsTruncated: boolean;
-    } = {
+    return {
       commits: rangeCommits,
       files,
       filesTruncated,
       commitsTruncated,
+      ...(status !== undefined && { status }),
+      ...(totalCommits !== undefined && { totalCommits }),
     };
-    if (typeof status === 'string') {
-      result.status = status;
-    }
-    if (typeof totalCommits === 'number') {
-      result.totalCommits = totalCommits;
-    }
-    return result;
   }
 
   /**
-   * List the commits in mergeBase..head (base-exclusive), oldest-first, using the list-commits endpoint which — unlike compare — is not capped at 250.
+   * List the commits in mergeBase..head (base-exclusive), oldest-first, using the list-commits endpoint, which unlike compare is not capped at 250.
    * Walks history newest-first from head until it reaches the merge-base commit.
    * `reachedBase` reports whether the walk actually terminated at the merge-base; when false, the returned set stopped on the scan bound and may be incomplete, so callers must treat it as unconfirmed rather than authoritative.
    */

@@ -62,39 +62,17 @@ describe('GeminiClient.generateText', () => {
     expect(generateContent).toHaveBeenCalledTimes(2);
   });
 
-  it('fails fast on 404 with a message naming the model input', async () => {
-    const generateContent = vi
-      .fn()
-      .mockRejectedValue(new ApiError({ message: 'models/gemini-3.5-flahs is not found', status: 404 }));
+  // Errors that can never succeed on a retry: one attempt, and the message must point at the input to fix.
+  it.each([
+    ['404, naming the model input', { message: 'models/gemini-3.5-flahs is not found', status: 404 }, /model "gemini-3\.5-flash".*"model" input/s],
+    ['403, naming GEMINI_API_KEY', { message: 'Permission denied', status: 403 }, /GEMINI_API_KEY/],
+    ['the 400 invalid-API-key error, naming GEMINI_API_KEY', { message: 'API key not valid. Please pass a valid API key.', status: 400 }, /GEMINI_API_KEY/],
+    ['other 400 errors, naming the model input', { message: 'Invalid argument', status: 400 }, /"model" input/],
+  ])('fails fast on %s', async (_label, apiError, expected) => {
+    const generateContent = vi.fn().mockRejectedValue(new ApiError(apiError));
     const client = makeClient(generateContent);
 
-    await expect(client.generateText(PAYLOAD, 2, 1)).rejects.toThrow(/model "gemini-3\.5-flash".*"model" input/s);
-    expect(generateContent).toHaveBeenCalledTimes(1);
-  });
-
-  it('fails fast on 403 with a message naming GEMINI_API_KEY', async () => {
-    const generateContent = vi.fn().mockRejectedValue(new ApiError({ message: 'Permission denied', status: 403 }));
-    const client = makeClient(generateContent);
-
-    await expect(client.generateText(PAYLOAD, 2, 1)).rejects.toThrow(/GEMINI_API_KEY/);
-    expect(generateContent).toHaveBeenCalledTimes(1);
-  });
-
-  it('fails fast on the 400 invalid-API-key error with a message naming GEMINI_API_KEY', async () => {
-    const generateContent = vi
-      .fn()
-      .mockRejectedValue(new ApiError({ message: 'API key not valid. Please pass a valid API key.', status: 400 }));
-    const client = makeClient(generateContent);
-
-    await expect(client.generateText(PAYLOAD, 2, 1)).rejects.toThrow(/GEMINI_API_KEY/);
-    expect(generateContent).toHaveBeenCalledTimes(1);
-  });
-
-  it('fails fast on other 400 errors with a message naming the model input', async () => {
-    const generateContent = vi.fn().mockRejectedValue(new ApiError({ message: 'Invalid argument', status: 400 }));
-    const client = makeClient(generateContent);
-
-    await expect(client.generateText(PAYLOAD, 2, 1)).rejects.toThrow(/"model" input/);
+    await expect(client.generateText(PAYLOAD, 2, 1)).rejects.toThrow(expected);
     expect(generateContent).toHaveBeenCalledTimes(1);
   });
 

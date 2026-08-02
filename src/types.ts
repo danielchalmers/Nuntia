@@ -52,18 +52,23 @@ export type LinkedItem = {
   references?: ReferenceSummary;
 };
 
+// The slice of Config echoed back to the caller, in the release context and in the run log.
+// Secrets are deliberately excluded.
+export type ReleaseInputs = Pick<
+  Config,
+  | 'baseCommit'
+  | 'headCommit'
+  | 'branch'
+  | 'promptUrl'
+  | 'model'
+  | 'maxLinkedItems'
+  | 'maxReferenceDepth'
+  | 'maxItemLength'
+>;
+
 export type ReleaseContext = {
   generatedAt: string;
-  inputs: {
-    baseCommit: string;
-    headCommit: string;
-    branch: string;
-    promptUrl: string;
-    model: string;
-    maxLinkedItems: number;
-    maxReferenceDepth: number;
-    maxItemLength: number;
-  };
+  inputs: ReleaseInputs;
   repository: {
     owner: string;
     repo: string;

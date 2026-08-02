@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, afterEach } from 'vitest';
 import { buildPrompt, fetchPrompt } from '../src/prompt';
 import type { ReleaseContext } from '../src/types';
 
@@ -52,40 +52,30 @@ describe('buildPrompt', () => {
     expect(userPrompt).toContain('"release-note"');
   });
 
-  it('fetches prompt text from the provided url', async () => {
-    const fetchMock = vi.fn().mockResolvedValue({
-      ok: true,
-      text: async () => 'Test prompt content',
-    });
-    const originalFetch = globalThis.fetch;
-    globalThis.fetch = fetchMock as unknown as typeof fetch;
+  // stubGlobal restores the real fetch in afterEach, including when an assertion throws.
+  afterEach(() => vi.unstubAllGlobals());
 
-    try {
-      const promptText = await fetchPrompt('https://example.com/prompt.txt');
-      expect(fetchMock).toHaveBeenCalledWith('https://example.com/prompt.txt');
-      expect(promptText).toBe('Test prompt content');
-    } finally {
-      globalThis.fetch = originalFetch;
-    }
+  function stubFetch(response: Record<string, unknown>) {
+    const fetchMock = vi.fn().mockResolvedValue(response);
+    vi.stubGlobal('fetch', fetchMock);
+    return fetchMock;
+  }
+
+  it('fetches prompt text from the provided url', async () => {
+    const fetchMock = stubFetch({ ok: true, text: async () => 'Test prompt content' });
+
+    const promptText = await fetchPrompt('https://example.com/prompt.txt');
+
+    expect(fetchMock).toHaveBeenCalledWith('https://example.com/prompt.txt');
+    expect(promptText).toBe('Test prompt content');
   });
 
   it('throws when the url fetch fails', async () => {
-    const fetchMock = vi.fn().mockResolvedValue({
-      ok: false,
-      status: 404,
-      statusText: 'Not Found',
-      text: async () => 'Missing prompt',
-    });
-    const originalFetch = globalThis.fetch;
-    globalThis.fetch = fetchMock as unknown as typeof fetch;
+    const fetchMock = stubFetch({ ok: false, status: 404, statusText: 'Not Found', text: async () => 'Missing prompt' });
 
-    try {
-      await expect(fetchPrompt('https://example.com/missing.txt')).rejects.toThrow(
-        'Failed to fetch prompt from https://example.com/missing.txt: 404 Not Found'
-      );
-      expect(fetchMock).toHaveBeenCalledWith('https://example.com/missing.txt');
-    } finally {
-      globalThis.fetch = originalFetch;
-    }
+    await expect(fetchPrompt('https://example.com/missing.txt')).rejects.toThrow(
+      'Failed to fetch prompt from https://example.com/missing.txt: 404 Not Found'
+    );
+    expect(fetchMock).toHaveBeenCalledWith('https://example.com/missing.txt');
   });
 });
