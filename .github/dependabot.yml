@@ -22,10 +22,7 @@ updates:
     schedule:
       interval: weekly
     groups:
-      actions-minor-patch:
+      actions-all:
         applies-to: version-updates
         patterns:
           - "*"
-        update-types:
-          - minor
-          - patch
