@@ -37,12 +37,12 @@
     "dotenv": "^17.4.2",
     "esbuild": "^0.28.2",
     "typescript": "^7.0.2",
-    "vitest": "^4.1.10"
+    "vitest": "^4.1.11"
   },
   "dependencies": {
     "@actions/core": "^3.0.1",
     "@actions/github": "^9.1.1",
-    "@google/genai": "^2.17.1",
+    "@google/genai": "^2.19.0",
     "@octokit/plugin-throttling": "^11.0.3"
   }
 }
