@@ -70,7 +70,7 @@ jobs:
 | `head-commit` | End commit SHA (inclusive). | Required |
 | `branch` | Branch name (`branch` or `owner/repo@branch`). | Required |
 | `prompt-url` | URL to raw prompt template content. | [example prompt](./examples/Nuntia.prompt) |
-| `model` | Gemini model identifier. | `gemini-3.5-flash` |
+| `model` | Gemini model identifier. | `gemini-3.8-flash` |
 | `max-linked-items` | Maximum linked issues/PRs/commits to fetch. | `5` |
 | `max-reference-depth` | Depth to follow references inside linked descriptions. | `2` |
 | `max-item-length` | Maximum length for each commit message and linked item title/body field. | `5000` |
