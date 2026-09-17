@@ -22,7 +22,7 @@ inputs:
   model:
     description: "Gemini model identifier used to generate release notes."
     required: false
-    default: "gemini-3.5-flash"
+    default: "gemini-3.8-flash"
   max-linked-items:
     description: "Cap on how many linked issues, PRs, or commits are fetched."
     required: false

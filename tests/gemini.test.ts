@@ -2,7 +2,7 @@ import { describe, it, expect, vi } from 'vitest';
 import { ApiError } from '@google/genai';
 import { buildTextPayload, GeminiClient, GeminiResponseError } from '../src/gemini';
 
-const PAYLOAD = buildTextPayload('system', 'user', 'gemini-3.5-flash');
+const PAYLOAD = buildTextPayload('system', 'user', 'gemini-3.8-flash');
 
 function makeTextResponse(text: string) {
   return {
@@ -64,7 +64,7 @@ describe('GeminiClient.generateText', () => {
 
   // Errors that can never succeed on a retry: one attempt, and the message must point at the input to fix.
   it.each([
-    ['404, naming the model input', { message: 'models/gemini-3.5-flahs is not found', status: 404 }, /model "gemini-3\.5-flash".*"model" input/s],
+    ['404, naming the model input', { message: 'models/gemini-3.8-flahs is not found', status: 404 }, /model "gemini-3\.8-flash".*"model" input/s],
     ['403, naming GEMINI_API_KEY', { message: 'Permission denied', status: 403 }, /GEMINI_API_KEY/],
     ['the 400 invalid-API-key error, naming GEMINI_API_KEY', { message: 'API key not valid. Please pass a valid API key.', status: 400 }, /GEMINI_API_KEY/],
     ['other 400 errors, naming the model input', { message: 'Invalid argument', status: 400 }, /"model" input/],
