@@ -17,6 +17,16 @@ function makeClient(generateContent: ReturnType<typeof vi.fn>) {
   return client;
 }
 
+describe('buildTextPayload', () => {
+  it('sends the system prompt as a system instruction and leaves sampling at the model default', () => {
+    expect(buildTextPayload('system text', 'user text', 'gemini-flash-latest')).toEqual({
+      model: 'gemini-flash-latest',
+      contents: [{ role: 'user', parts: [{ text: 'user text' }] }],
+      config: { systemInstruction: 'system text' },
+    });
+  });
+});
+
 describe('GeminiClient.generateText', () => {
   it('returns text and token counts on success', async () => {
     const generateContent = vi.fn().mockResolvedValue(makeTextResponse('notes'));
@@ -47,6 +57,33 @@ describe('GeminiClient.generateText', () => {
 
     await expect(client.generateText(PAYLOAD, 2, 1)).rejects.toThrow(/HTTP 500.*3 attempts/s);
     expect(generateContent).toHaveBeenCalledTimes(3);
+  });
+
+  it('backs off exponentially between attempts', async () => {
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const generateContent = vi.fn().mockRejectedValue(new ApiError({ message: 'Unavailable', status: 503 }));
+    const client = makeClient(generateContent);
+    const sleep = vi.spyOn(client as any, 'sleep').mockResolvedValue(undefined);
+
+    try {
+      await expect(client.generateText(PAYLOAD, 3, 5000)).rejects.toThrow(/4 attempts/);
+      expect(sleep.mock.calls.map(([ms]) => ms)).toEqual([5000, 10000, 20000]);
+    } finally {
+      logSpy.mockRestore();
+    }
+  });
+
+  it.each([
+    ['408 request timeout', new ApiError({ message: 'Timeout', status: 408 })],
+    ['a non-ApiError that still carries an HTTP status', Object.assign(new Error('Bad gateway'), { status: 502 })],
+  ])('retries %s', async (_label, error) => {
+    const generateContent = vi.fn().mockRejectedValueOnce(error).mockResolvedValueOnce(makeTextResponse('notes'));
+    const client = makeClient(generateContent);
+
+    const result = await client.generateText(PAYLOAD, 2, 1);
+
+    expect(result.text).toBe('notes');
+    expect(generateContent).toHaveBeenCalledTimes(2);
   });
 
   it('retries network errors that carry no HTTP status', async () => {
@@ -94,6 +131,18 @@ describe('GeminiClient.generateText', () => {
 
     await expect(client.generateText(PAYLOAD, 2, 1)).rejects.toThrow(/refused to complete the response \(SAFETY\)/);
     expect(generateContent).toHaveBeenCalledTimes(1);
+  });
+
+  it('ignores an unspecified block reason and joins the text parts', async () => {
+    const generateContent = vi.fn().mockResolvedValue({
+      promptFeedback: { blockReason: 'BLOCKED_REASON_UNSPECIFIED' },
+      candidates: [{ finishReason: 'STOP', content: { parts: [{ text: '## Notes\n' }, { inlineData: {} }, { text: '- Fixed it\n\n' }] } }],
+    });
+    const client = makeClient(generateContent);
+
+    const result = await client.generateText(PAYLOAD, 2, 1);
+
+    expect(result).toEqual({ text: '## Notes\n- Fixed it', inputTokens: 0, outputTokens: 0 });
   });
 
   it('retries an empty response because it can be transient', async () => {

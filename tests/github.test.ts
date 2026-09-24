@@ -1,5 +1,17 @@
 import { describe, it, expect, vi } from 'vitest';
+import * as core from '@actions/core';
+import * as github from '@actions/github';
 import { GitHubClient } from '../src/github';
+
+// Capture the octokit options (for the throttle callbacks) and keep rate-limit warnings out of the test log as ::warning:: commands.
+vi.mock('@actions/github', async (importActual) => {
+  const actual = await importActual<typeof import('@actions/github')>();
+  return { ...actual, getOctokit: vi.fn(() => ({})) };
+});
+vi.mock('@actions/core', async (importActual) => {
+  const actual = await importActual<typeof import('@actions/core')>();
+  return { ...actual, warning: vi.fn() };
+});
 
 function makeCompareCommit(index: number) {
   const sha = index.toString(16).padStart(40, '0');
@@ -195,13 +207,99 @@ describe('GitHubClient.compareCommits', () => {
     const client = makeClient({ repos: { compareCommits, listCommits, getCommit } });
     const result = await client.compareCommits('BASE', 'HEAD');
 
-    expect(getCommit).toHaveBeenCalled();
+    expect(getCommit).toHaveBeenCalledWith({ owner: 'acme', repo: 'widgets', ref: 'BASE' });
     expect(result.commits).toHaveLength(260);
     expect(result.commitsTruncated).toBe(false);
+  });
+
+  it('flags truncation when the merge-base cannot be resolved at all', async () => {
+    const total = 260;
+    const compareCommits = mockResponses(
+      comparePage(total, undefined, makePage(0, 100)),
+      comparePage(total, undefined, makePage(100, 100)),
+      comparePage(total, undefined, makePage(200, 50))
+    );
+    const getCommit = vi.fn().mockRejectedValue(new Error('Not Found'));
+    const listCommits = vi.fn();
+
+    const client = makeClient({ repos: { compareCommits, listCommits, getCommit } });
+    const result = await client.compareCommits('BASE', 'HEAD');
+
+    expect(result.commitsTruncated).toBe(true);
+    expect(result.commits).toHaveLength(250);
+    expect(listCommits).not.toHaveBeenCalled();
+  });
+
+  it('flags truncation when total_commits is missing and a full 250-commit cap was collected', async () => {
+    const page = (commits: unknown[]) => ({ status: 'ahead', commits });
+    const compareCommits = mockResponses(page(makePage(0, 100)), page(makePage(100, 100)), page(makePage(200, 50)));
+
+    const client = makeClient({ repos: { compareCommits } });
+    const result = await client.compareCommits('BASE', 'HEAD');
+
+    expect(result.totalCommits).toBeUndefined();
+    expect(result.commits).toHaveLength(250);
+    expect(result.commitsTruncated).toBe(true);
+  });
+
+  it('stops paginating when a page adds no new commits', async () => {
+    // Without the no-progress guard, a server repeating the same full page would loop forever.
+    const repeated = { status: 'ahead', commits: makePage(0, 100) };
+    const compareCommits = vi.fn().mockResolvedValue({ data: repeated });
+
+    const client = makeClient({ repos: { compareCommits } });
+    const result = await client.compareCommits('BASE', 'HEAD');
+
+    expect(compareCommits).toHaveBeenCalledTimes(2);
+    expect(result.commits).toHaveLength(100);
+  });
+});
+
+describe('GitHubClient.getCommit', () => {
+  it.each([
+    ['prefixes the GitHub login with @', { author: { login: 'octocat' } }, '@octocat'],
+    ['falls back to the committer login', { committer: { login: 'web-flow' } }, '@web-flow'],
+    ['uses the git author name when there is no GitHub account', { commit: { message: 'm', author: { name: 'Jane Dev' } } }, 'Jane Dev'],
+    ['reports unknown when nothing identifies the author', { commit: { message: 'm' } }, 'unknown'],
+  ])('%s', async (_label, data, expected) => {
+    const client = makeClient({ repos: { getCommit: mockResponses({ sha: 'abc', ...data }) } });
+
+    const commit = await client.getCommit('acme', 'widgets', 'abc');
+
+    expect(commit.author).toBe(expected);
   });
 });
 
 describe('GitHubClient.getIssueOrPullRequest', () => {
+  it('maps an issue with trimmed, de-duplicated labels', async () => {
+    const client = makeClient({
+      issues: {
+        get: mockResponses({
+          number: 42,
+          title: 'Crash on start',
+          body: null,
+          html_url: 'https://github.com/acme/widgets/issues/42',
+          state: 'open',
+          labels: [' bug ', { name: 'bug' }, { name: 'release-note' }, { name: '  ' }, { color: 'fff' }, ''],
+        }),
+      },
+    });
+
+    const details = await client.getIssueOrPullRequest('other', 'repo', 42);
+
+    expect(details).toEqual({
+      number: 42,
+      title: 'Crash on start',
+      body: '',
+      url: 'https://github.com/acme/widgets/issues/42',
+      state: 'open',
+      labels: ['bug', 'release-note'],
+      type: 'issue',
+      owner: 'other',
+      repo: 'repo',
+    });
+  });
+
   it('reports a merged pull request as state "merged"', async () => {
     // The issues endpoint reports a merged PR with state 'closed'; merged_at is what marks it as shipped.
     const client = makeClient({
@@ -218,6 +316,7 @@ describe('GitHubClient.getIssueOrPullRequest', () => {
     const details = await client.getIssueOrPullRequest('acme', 'widgets', 57);
 
     expect(details.state).toBe('merged');
+    expect(details.type).toBe('pull');
   });
 
   it('keeps a pull request closed without merging as state "closed"', async () => {
@@ -235,5 +334,21 @@ describe('GitHubClient.getIssueOrPullRequest', () => {
     const details = await client.getIssueOrPullRequest('acme', 'widgets', 58);
 
     expect(details.state).toBe('closed');
+  });
+});
+
+describe('GitHubClient rate limiting', () => {
+  function throttleOptions() {
+    new GitHubClient('token', 'acme', 'widgets');
+    const options = vi.mocked(github.getOctokit).mock.lastCall?.[1] as any;
+    return options.throttle;
+  }
+
+  it.each(['onRateLimit', 'onSecondaryRateLimit'])('%s retries up to three times, then gives up', (callback) => {
+    const handler = throttleOptions()[callback];
+    const request = { method: 'GET', url: '/repos/{owner}/{repo}/compare/{basehead}' };
+
+    expect([0, 1, 2, 3].map(retryCount => handler(30, request, {}, retryCount))).toEqual([true, true, true, false]);
+    expect(core.warning).toHaveBeenCalledWith(expect.stringContaining('GET /repos/{owner}/{repo}/compare/{basehead}'));
   });
 });
