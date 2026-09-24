@@ -13,30 +13,51 @@ function requireInput(name: string): string {
   return value;
 }
 
-type BranchTarget = {
+type Repository = {
   owner: string;
   repo: string;
-  branch: string;
 };
 
-function parseBranchInput(input: string, fallbackOwner: string, fallbackRepo: string): BranchTarget {
+type BranchTarget = {
+  branch: string;
+  // Set only when the input names a repository with owner/repo@branch.
+  repository?: Repository;
+};
+
+function parseBranchInput(input: string): BranchTarget {
   const trimmed = input.trim();
   if (!trimmed) {
     throw new Error('Missing required input: branch.');
   }
 
-  const match = trimmed.match(/^([^/\s]+)\/([^@\s]+)@(.+)$/);
-  if (match && match[1] && match[2] && match[3]) {
-    const owner = match[1];
-    const repo = match[2];
+  // The branch part may be empty so that a bare `owner/repo@` is rejected below rather than taken as a branch name.
+  const match = trimmed.match(/^([^/\s]+)\/([^@\s]+)@(.*)$/);
+  if (match && match[1] && match[2] && match[3] !== undefined) {
     const branch = match[3].trim();
     if (!branch) {
       throw new Error('Branch input uses owner/repo@branch format but branch is empty.');
     }
-    return { owner, repo, branch };
+    return { branch, repository: { owner: match[1], repo: match[2] } };
   }
 
-  return { owner: fallbackOwner, repo: fallbackRepo, branch: trimmed };
+  return { branch: trimmed };
+}
+
+/**
+ * The repository the workflow runs in.
+ * context.repo already falls back from GITHUB_REPOSITORY to the event payload, and throws when neither is available.
+ */
+function resolveWorkflowRepository(): Repository {
+  let repository: { owner?: string; repo?: string } = {};
+  try {
+    repository = github.context.repo;
+  } catch {
+    // Reported below with a message that names both ways to fix it.
+  }
+  if (!repository.owner || !repository.repo) {
+    throw new Error('Failed to resolve repository context (owner/repo). Ensure this runs in GitHub Actions with a valid repository context or pass branch as owner/repo@branch.');
+  }
+  return { owner: repository.owner, repo: repository.repo };
 }
 
 /**
@@ -44,19 +65,6 @@ function parseBranchInput(input: string, fallbackOwner: string, fallbackRepo: st
  * Throws early with actionable messages if mandatory secrets (GITHUB_TOKEN, GEMINI_API_KEY) are missing or repo context is absent.
  */
 export function getConfig(): Config {
-  let { owner, repo } = github.context.repo as { owner?: string; repo?: string };
-  owner = owner || '';
-  repo = repo || '';
-  const ghRepoEnv = process.env.GITHUB_REPOSITORY || '';
-  if ((!owner || !repo) && ghRepoEnv.includes('/')) {
-    const [o, r] = ghRepoEnv.split('/', 2);
-    if (!owner) owner = o;
-    if (!repo) repo = r;
-  }
-  const payloadRepo: any = (github as any).context?.payload?.repository;
-  if (!owner && payloadRepo?.owner?.login) owner = String(payloadRepo.owner.login);
-  if (!repo && payloadRepo?.name) repo = String(payloadRepo.name);
-
   const token = process.env.GITHUB_TOKEN || '';
   const geminiApiKey = process.env.GEMINI_API_KEY || '';
 
@@ -65,14 +73,9 @@ export function getConfig(): Config {
 
   const baseCommit = requireInput('base-commit');
   const headCommit = requireInput('head-commit');
-  const rawBranch = requireInput('branch');
-  const branchTarget = parseBranchInput(rawBranch, owner || '', repo || '');
-  owner = branchTarget.owner;
-  repo = branchTarget.repo;
-  const branch = branchTarget.branch;
-  if (!owner || !repo) {
-    throw new Error('Failed to resolve repository context (owner/repo). Ensure this runs in GitHub Actions with a valid repository context or pass branch as owner/repo@branch.');
-  }
+  const { branch, repository } = parseBranchInput(requireInput('branch'));
+  // Only consult the workflow's repository when the branch input doesn't name one, so owner/repo@branch works without repository context.
+  const { owner, repo } = repository ?? resolveWorkflowRepository();
   const promptUrl = core.getInput('prompt-url');
   const model = core.getInput('model') || 'gemini-flash-latest';
   const maxLinkedItems = Math.max(0, Math.floor(parseNumber(core.getInput('max-linked-items') || '5', 5)));

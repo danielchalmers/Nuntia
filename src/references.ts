@@ -128,18 +128,25 @@ export function extractReferences(
   return refs;
 }
 
-export function summarizeReferences(references: Reference[]): ReferenceSummary {
-  const issues = new Set<number>();
-  const pulls = new Set<number>();
+/**
+ * Group references by type for the release context.
+ * References in the release repository stay bare (issue/pull numbers, commit SHAs); references to any other repository are qualified the way GitHub autolinks them (`owner/repo#123`, `owner/repo@sha`) so they can't be mistaken for local ones.
+ */
+export function summarizeReferences(references: Reference[], owner: string, repo: string): ReferenceSummary {
+  const issues = new Set<number | string>();
+  const pulls = new Set<number | string>();
   const commits = new Set<string>();
+  // GitHub owner and repository names are case-insensitive.
+  const releaseRepo = `${owner}/${repo}`.toLowerCase();
 
   for (const ref of references) {
+    const refRepo = `${ref.owner}/${ref.repo}`;
+    const isLocal = refRepo.toLowerCase() === releaseRepo;
     if (ref.type === 'commit') {
-      commits.add(ref.id);
-    } else if (ref.type === 'pull') {
-      pulls.add(Number(ref.id));
+      commits.add(isLocal ? ref.id : `${refRepo}@${ref.id}`);
     } else {
-      issues.add(Number(ref.id));
+      const id = isLocal ? Number(ref.id) : `${refRepo}#${ref.id}`;
+      (ref.type === 'pull' ? pulls : issues).add(id);
     }
   }
 

@@ -46,22 +46,17 @@ npm ci
 
 Use `npm ci` (clean install) for reproducible builds based on `package-lock.json`.
 
-### 3. Set Up Environment Variables
+### 3. Credentials
 
-Create a `.env` file in the root directory (this file is gitignored):
-
-```bash
-GITHUB_TOKEN=your_github_token_here
-GEMINI_API_KEY=your_gemini_api_key_here
-```
-
-These are required for running tests and local development.
+Unit tests mock GitHub, Gemini, and `fetch`, so `npm test` needs no credentials or network access.
+`GITHUB_TOKEN` and `GEMINI_API_KEY` are only needed to run the action itself against real services.
 
 ## Development Workflow
 
 ### Available npm Scripts
 
 - `npm run typecheck` - Type-check TypeScript without emitting files
+- `npm run typecheck:test` - Type-check the tests (and source) with `tsconfig.test.json`
 - `npm run dev` - Watch mode for TypeScript compilation
 - `npm run build` - Full production build (typecheck, clean, and bundle)
 - `npm run clean` - Remove the dist directory
@@ -87,7 +82,6 @@ npm test
 #### Test Environment
 
 - Tests use Vitest with Node.js environment
-- Setup file: `tests/setupEnv.ts`
 - Test files: `tests/**/*.test.ts`
 
 ## Building the Project
@@ -134,7 +128,7 @@ If you forget to rebuild dist after changing source code, the CI will fail. esbu
 
 Before committing changes, ensure:
 
-1. ✅ **Type-check passes**: `npm run typecheck`
+1. ✅ **Type-check passes**: `npm run typecheck` and `npm run typecheck:test`
 2. ✅ **Tests pass**: `npm test`
 3. ✅ **Build succeeds**: `npm run build`
 4. ✅ **dist is up to date**: Commit any changes in `dist/` folder
@@ -199,10 +193,8 @@ The action does not upload them itself (that would require bundling `@actions/ar
 
 ### Test Failures
 
-**Issue**: Tests fail with API errors
-- Ensure `GEMINI_API_KEY` is set in `.env`
-- Ensure `GITHUB_TOKEN` is set in `.env`
-- Check internet connectivity
+**Issue**: A test tries to reach GitHub, Gemini, or the network
+- Tests must not depend on real services; mock the client (see the `makeClient` helpers in `tests/`) or stub `fetch` with `vi.stubGlobal`
 
 ## Best Practices
 
