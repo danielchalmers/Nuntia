@@ -25,8 +25,9 @@ function parseBranchInput(input: string, fallbackOwner: string, fallbackRepo: st
     throw new Error('Missing required input: branch.');
   }
 
-  const match = trimmed.match(/^([^/\s]+)\/([^@\s]+)@(.+)$/);
-  if (match && match[1] && match[2] && match[3]) {
+  // The branch part may be empty so that a bare `owner/repo@` is rejected below rather than taken as a branch name.
+  const match = trimmed.match(/^([^/\s]+)\/([^@\s]+)@(.*)$/);
+  if (match && match[1] && match[2] && match[3] !== undefined) {
     const owner = match[1];
     const repo = match[2];
     const branch = match[3].trim();
