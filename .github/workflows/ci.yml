@@ -39,14 +39,7 @@ jobs:
       - name: Build
         run: npm run build
       - name: Verify dist/ is up to date
-        id: check-dist
         run: npm run check:dist
-      - name: Upload rebuilt dist
-        if: failure() && steps.check-dist.outcome == 'failure'
-        uses: actions/upload-artifact@v7
-        with:
-          name: dist
-          path: dist/
       - name: Mock release notes
         if: env.HAS_GEMINI_KEY == 'true'
         uses: ./

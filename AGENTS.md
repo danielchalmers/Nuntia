@@ -149,7 +149,7 @@ The project uses GitHub Actions for CI (`.github/workflows/ci.yml`):
 2. Type-checks the source and the tests
 3. Runs unit tests
 4. Builds the project
-5. Verifies dist folder is up to date (on failure, the rebuilt `dist/` is uploaded as a `dist` artifact)
+5. Verifies dist folder is up to date
 6. Runs a mock release-notes generation (skipped when `GEMINI_API_KEY` is unavailable, e.g. fork PRs)
 
 ## Common Tasks
