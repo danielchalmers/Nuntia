@@ -140,6 +140,24 @@ describe('buildReleaseContext', () => {
     });
   });
 
+  it('qualifies references made inside a linked item from another repository', async () => {
+    const linkedSha = 'abcdef1234567890abcdef1234567890abcdef12';
+    const getCommit = vi
+      .fn()
+      .mockResolvedValueOnce(makeCommit({ message: `Fixes #42, ports https://github.com/other/repo/commit/${linkedSha}` }))
+      .mockResolvedValueOnce(makeCommit({ sha: linkedSha, message: 'Upstream fix for #3' }));
+
+    const context = await buildReleaseContext(makeConfig({ maxReferenceDepth: 1 }), makeClient({ commit: getCommit }));
+
+    expect(context.commits[0]?.references).toEqual({ issues: [42], pulls: [], commits: [`other/repo@${linkedSha}`] });
+    // "#3" in other/repo's commit means other/repo#3, not issue 3 of the release repository.
+    expect(context.linkedItems.find(item => item.type === 'commit')?.references).toEqual({
+      issues: ['other/repo#3'],
+      pulls: [],
+      commits: [],
+    });
+  });
+
   it('keeps linked item body content present while truncating with max-item-length', async () => {
     const gh = makeClient({
       issue: makeIssue({

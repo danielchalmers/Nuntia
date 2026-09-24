@@ -1,5 +1,5 @@
 import * as core from '@actions/core';
-import type { CommitInfo, Config, LinkedItem, Reference, ReferenceType, ReleaseContext, ReleaseInputs } from './types';
+import type { CommitInfo, Config, LinkedItem, Reference, ReferenceSummary, ReferenceType, ReleaseContext, ReleaseInputs } from './types';
 import { extractReferences, referenceKey, summarizeReferences } from './references';
 import type { CommitDetails, IssueOrPullDetails } from './github';
 import { GitHubClient } from './github';
@@ -34,14 +34,14 @@ function mergeReferencedBy(linkedItems: Map<string, LinkedItem>, key: string, so
   return true;
 }
 
-function toCommitInfo(commit: CommitDetails, references: Reference[], message: string): CommitInfo {
+function toCommitInfo(commit: CommitDetails, references: ReferenceSummary, message: string): CommitInfo {
   return {
     sha: commit.sha,
     message,
     url: commit.url,
     author: commit.author,
     date: commit.date,
-    references: summarizeReferences(references),
+    references,
   };
 }
 
@@ -178,7 +178,7 @@ export async function buildReleaseContext(cfg: Config, gh: GitHubClient): Promis
     const refs = extractReferences(cleanedMessage, cfg.owner, cfg.repo, knownCommits).map(ref =>
       normalizeCommitReference(ref, knownCommits)
     );
-    const commitInfo = toCommitInfo(commit, refs, cleanedMessage);
+    const commitInfo = toCommitInfo(commit, summarizeReferences(refs, cfg.owner, cfg.repo), cleanedMessage);
     commitEntries.push(commitInfo);
     const source = formatSource('commit', commitInfo.sha);
     for (const ref of refs) {
@@ -218,7 +218,7 @@ export async function buildReleaseContext(cfg: Config, gh: GitHubClient): Promis
 
       const refs = extractReferences(resolved.referenceText, normalizedRef.owner, normalizedRef.repo, knownCommits)
         .map(ref => normalizeCommitReference(ref, knownCommits));
-      resolved.linked.references = summarizeReferences(refs);
+      resolved.linked.references = summarizeReferences(refs, cfg.owner, cfg.repo);
       linkedItems.set(resolved.key, resolved.linked);
       linkedItemCountsByRoot.set(item.rootCommitSha, linkedCountForRoot + 1);
 

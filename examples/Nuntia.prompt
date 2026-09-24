@@ -8,7 +8,7 @@ INPUT
 You receive a JSON payload with:
 - repository: { owner, repo, branch }
 - range: { base, head, totalCommits, changedFiles }
-- commits[]: { sha, message, url, author, date, references: { issues, pulls, commits } }
+- commits[]: { sha, message, url, author, date, references: { issues, pulls, commits } } (bare numbers and SHAs are in this repository; other repositories appear as owner/repo#123 or owner/repo@sha)
 - linkedItems[]: { type, id, title, body, state, labels, url, referencedBy }
 Use ONLY this data. Never invent changes, numbers, authors, code, or links that the context does not support. When something is uncertain, leave it out rather than guess.
 

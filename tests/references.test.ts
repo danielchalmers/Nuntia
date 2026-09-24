@@ -48,7 +48,7 @@ Also mentioned: deadbeef1
 
   it('summarizes references into categories', () => {
     const refs = extractReferences('Fixes #1 and #2, see https://github.com/acme/widgets/pull/9', 'acme', 'widgets');
-    const summary = summarizeReferences(refs);
+    const summary = summarizeReferences(refs, 'acme', 'widgets');
     expect(summary.issues.sort()).toEqual([1, 2]);
     expect(summary.pulls).toEqual([9]);
   });
@@ -65,5 +65,27 @@ Also mentioned: deadbeef1
   it('prefers pull classification over issue for ambiguous short references', () => {
     const refs = extractReferences('Merge pull request #57 from acme/widgets\n\nFixes #57', 'acme', 'widgets');
     expect(toKeys(refs)).toEqual(['pull:acme/widgets#57']);
+  });
+});
+
+describe('summarizeReferences', () => {
+  it('qualifies references to other repositories so they are not mistaken for local ones', () => {
+    const refs = extractReferences(
+      'Fixes #1 and other/lib#1, ports https://github.com/other/lib/pull/2 and https://github.com/other/lib/commit/abcdef1234567890abcdef1234567890abcdef12',
+      'acme',
+      'widgets'
+    );
+
+    expect(summarizeReferences(refs, 'acme', 'widgets')).toEqual({
+      issues: ['other/lib#1', 1],
+      pulls: ['other/lib#2'],
+      commits: ['other/lib@abcdef1234567890abcdef1234567890abcdef12'],
+    });
+  });
+
+  it('treats the release repository case-insensitively', () => {
+    const refs = extractReferences('See Acme/Widgets#7', 'acme', 'widgets');
+
+    expect(summarizeReferences(refs, 'acme', 'widgets').issues).toEqual([7]);
   });
 });
