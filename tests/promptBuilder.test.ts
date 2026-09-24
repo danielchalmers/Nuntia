@@ -18,40 +18,35 @@ describe('buildPrompt', () => {
     repository: { owner: 'acme', repo: 'widgets', branch: 'main' },
     range: { base: 'a1b2c3d', head: 'd4e5f6g', totalCommits: 1, changedFiles: [] },
     commits: [],
-    linkedItems: [],
+    linkedItems: [
+      {
+        type: 'issue',
+        owner: 'acme',
+        repo: 'widgets',
+        id: '42',
+        title: 'Fix flaky cache invalidation',
+        labels: ['bug', 'release-note'],
+        referencedBy: ['commit:a1b2c3d'],
+      },
+    ],
   };
 
-  it('injects the prompt text and release context JSON', () => {
-    const { systemPrompt, userPrompt } = buildPrompt(context, 'Test prompt content');
-    expect(systemPrompt).toContain('Test prompt content');
-    expect(userPrompt).toContain('"base": "a1b2c3d"');
-    expect(userPrompt).toContain('"head": "d4e5f6g"');
+  it('puts the fetched prompt in the system prompt, followed by the input guidance', () => {
+    const { systemPrompt } = buildPrompt(context, 'Test prompt content');
+
+    expect(systemPrompt.startsWith('Test prompt content\n\n=== INPUT GUIDANCE ===')).toBe(true);
   });
 
-  it('keeps linked item labels in prompt metadata', () => {
-    const { userPrompt } = buildPrompt(
-      {
-        ...context,
-        linkedItems: [
-          {
-            type: 'issue',
-            owner: 'acme',
-            repo: 'widgets',
-            id: '42',
-            title: 'Fix flaky cache invalidation',
-            labels: ['bug', 'release-note'],
-            referencedBy: ['commit:a1b2c3d'],
-          },
-        ],
-      },
-      'Test prompt content'
-    );
+  it('sends the complete release context as JSON in the user prompt', () => {
+    const { userPrompt } = buildPrompt(context, 'Test prompt content');
+    const header = '=== RELEASE CONTEXT (JSON) ===\n';
 
-    expect(userPrompt).toContain('"labels": [');
-    expect(userPrompt).toContain('"bug"');
-    expect(userPrompt).toContain('"release-note"');
+    expect(userPrompt.startsWith(header)).toBe(true);
+    expect(JSON.parse(userPrompt.slice(header.length))).toEqual(context);
   });
+});
 
+describe('fetchPrompt', () => {
   // stubGlobal restores the real fetch in afterEach, including when an assertion throws.
   afterEach(() => vi.unstubAllGlobals());
 
@@ -61,21 +56,43 @@ describe('buildPrompt', () => {
     return fetchMock;
   }
 
-  it('fetches prompt text from the provided url', async () => {
+  it('fetches prompt text from the trimmed url', async () => {
     const fetchMock = stubFetch({ ok: true, text: async () => 'Test prompt content' });
 
-    const promptText = await fetchPrompt('https://example.com/prompt.txt');
+    const promptText = await fetchPrompt('  https://example.com/prompt.txt\n');
 
     expect(fetchMock).toHaveBeenCalledWith('https://example.com/prompt.txt');
     expect(promptText).toBe('Test prompt content');
   });
 
+  it('rejects an empty url without making a request', async () => {
+    const fetchMock = stubFetch({ ok: true, text: async () => 'unused' });
+
+    await expect(fetchPrompt('   ')).rejects.toThrow('Prompt URL is required and cannot be empty.');
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
   it('throws when the url fetch fails', async () => {
-    const fetchMock = stubFetch({ ok: false, status: 404, statusText: 'Not Found', text: async () => 'Missing prompt' });
+    stubFetch({ ok: false, status: 404, statusText: 'Not Found', text: async () => 'Missing prompt' });
 
     await expect(fetchPrompt('https://example.com/missing.txt')).rejects.toThrow(
       'Failed to fetch prompt from https://example.com/missing.txt: 404 Not Found'
     );
-    expect(fetchMock).toHaveBeenCalledWith('https://example.com/missing.txt');
+  });
+
+  it('throws when the prompt is blank', async () => {
+    stubFetch({ ok: true, text: async () => ' \n\t ' });
+
+    await expect(fetchPrompt('https://example.com/blank.txt')).rejects.toThrow(
+      'Prompt at https://example.com/blank.txt is empty.'
+    );
+  });
+
+  it('names the url when the request itself fails', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new TypeError('fetch failed')));
+
+    await expect(fetchPrompt('https://example.com/prompt.txt')).rejects.toThrow(
+      'Failed to fetch prompt from https://example.com/prompt.txt: fetch failed'
+    );
   });
 });
