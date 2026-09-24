@@ -8,11 +8,12 @@
     "build": "npm run typecheck && npm run clean && esbuild src/index.ts --bundle --platform=node --target=node24 --format=cjs --minify --legal-comments=eof --outfile=dist/index.js",
     "clean": "node -e \"require('fs').rmSync('dist',{recursive:true,force:true})\"",
     "typecheck": "tsc --noEmit",
+    "typecheck:test": "tsc -p tsconfig.test.json",
     "check:dist": "node scripts/check-dist.cjs",
     "dev": "tsc --noEmit -w",
     "test": "vitest run",
     "test:watch": "vitest",
-    "verify": "npm run typecheck && npm test && npm run build && npm run check:dist"
+    "verify": "npm run typecheck && npm run typecheck:test && npm test && npm run build && npm run check:dist"
   },
   "keywords": [
     "github-actions",

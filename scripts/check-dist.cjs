@@ -8,6 +8,9 @@ const status = execFileSync("git", ["status", "--porcelain", "--", "dist"], {
 
 if (status.trim().length > 0) {
   console.error("dist is not up to date. Run `npm run build` and commit the generated output.");
+  if (process.env.GITHUB_ACTIONS) {
+    console.error("The rebuilt bundle is attached to this run as the 'dist' artifact.");
+  }
   console.error(status.trimEnd());
   process.exit(1);
 }

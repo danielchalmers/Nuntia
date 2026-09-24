@@ -62,6 +62,7 @@ These are required for running tests and local development.
 ### Available npm Scripts
 
 - `npm run typecheck` - Type-check TypeScript without emitting files
+- `npm run typecheck:test` - Type-check the tests
 - `npm run dev` - Watch mode for TypeScript compilation
 - `npm run build` - Full production build (typecheck, clean, and bundle)
 - `npm run clean` - Remove the dist directory
@@ -134,7 +135,7 @@ If you forget to rebuild dist after changing source code, the CI will fail. esbu
 
 Before committing changes, ensure:
 
-1. ✅ **Type-check passes**: `npm run typecheck`
+1. ✅ **Type-check passes**: `npm run typecheck` and `npm run typecheck:test`
 2. ✅ **Tests pass**: `npm test`
 3. ✅ **Build succeeds**: `npm run build`
 4. ✅ **dist is up to date**: Commit any changes in `dist/` folder
@@ -145,11 +146,11 @@ Before committing changes, ensure:
 The project uses GitHub Actions for CI (`.github/workflows/ci.yml`):
 
 1. Installs dependencies with `npm ci`
-2. Runs type-checking
-3. Builds the project
-4. Verifies dist folder is up to date
-5. Runs a mock release-notes generation
-6. Runs unit tests (separate workflow: `tests.yml`)
+2. Type-checks the source and the tests
+3. Runs unit tests
+4. Builds the project
+5. Verifies dist folder is up to date (on failure, the rebuilt `dist/` is uploaded as a `dist` artifact)
+6. Runs a mock release-notes generation (skipped when `GEMINI_API_KEY` is unavailable, e.g. fork PRs)
 
 ## Common Tasks
 
