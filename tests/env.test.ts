@@ -81,6 +81,12 @@ describe('getConfig', () => {
     expect(getConfig()).toMatchObject({ owner: 'other-org', repo: 'other-repo', branch: 'release/2.x' });
   });
 
+  it.each(['other-org/other-repo@', 'other-org/other-repo@   '])('rejects %j instead of treating it as a branch name', (branch) => {
+    setInputs({ ...REQUIRED_INPUTS, branch });
+
+    expect(() => getConfig()).toThrow('Branch input uses owner/repo@branch format but branch is empty.');
+  });
+
   it('treats a branch containing slashes but no @ as a plain branch name', () => {
     setInputs({ ...REQUIRED_INPUTS, branch: 'feature/login' });
 

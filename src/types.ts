@@ -22,9 +22,10 @@ export type Reference = {
   id: string;
 };
 
+// Bare numbers and SHAs refer to the release repository; other repositories are qualified as `owner/repo#123` or `owner/repo@sha`.
 export type ReferenceSummary = {
-  issues: number[];
-  pulls: number[];
+  issues: Array<number | string>;
+  pulls: Array<number | string>;
   commits: string[];
 };
 
