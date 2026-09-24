@@ -19,7 +19,7 @@ const BASE_CONFIG: Config = {
   token: 'token',
   geminiApiKey: 'gemini-key',
   promptUrl: 'https://example.com/prompt.txt',
-  model: 'gemini-3.1-flash-lite',
+  model: 'gemini-3.5-flash-lite',
   maxLinkedItems: 3,
   maxReferenceDepth: 2,
   maxItemLength: 5000,
