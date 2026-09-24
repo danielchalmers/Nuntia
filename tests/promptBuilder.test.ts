@@ -10,7 +10,7 @@ describe('buildPrompt', () => {
       headCommit: 'd4e5f6g',
       branch: 'main',
       promptUrl: 'https://example.com/prompt.txt',
-      model: 'gemini-3.1-flash-lite',
+      model: 'gemini-3.5-flash-lite',
       maxLinkedItems: 3,
       maxReferenceDepth: 2,
       maxItemLength: 5000,
