@@ -2,21 +2,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => ({
   getInput: vi.fn(),
-  contextRepo: { owner: 'acme', repo: 'widgets' },
 }));
 
 vi.mock('@actions/core', () => ({
   getInput: mocks.getInput,
 }));
 
-vi.mock('@actions/github', () => ({
-  context: {
-    get repo() {
-      return mocks.contextRepo;
-    },
-    payload: {},
-  },
-}));
+// @actions/github is deliberately not mocked: its context.repo reads GITHUB_REPOSITORY on each access, so these tests exercise the real fallback and error behavior.
 
 import { getConfig } from '../src/env';
 
@@ -29,6 +21,7 @@ function setInputs(values: Record<string, string>) {
 beforeEach(() => {
   vi.stubEnv('GITHUB_TOKEN', 'token');
   vi.stubEnv('GEMINI_API_KEY', 'gemini-key');
+  vi.stubEnv('GITHUB_REPOSITORY', 'acme/widgets');
   setInputs(REQUIRED_INPUTS);
 });
 
@@ -85,6 +78,19 @@ describe('getConfig', () => {
     setInputs({ ...REQUIRED_INPUTS, branch });
 
     expect(() => getConfig()).toThrow('Branch input uses owner/repo@branch format but branch is empty.');
+  });
+
+  it('accepts owner/repo@branch without any repository context', () => {
+    vi.stubEnv('GITHUB_REPOSITORY', '');
+    setInputs({ ...REQUIRED_INPUTS, branch: 'other-org/other-repo@main' });
+
+    expect(getConfig()).toMatchObject({ owner: 'other-org', repo: 'other-repo', branch: 'main' });
+  });
+
+  it('asks for owner/repo@branch when a plain branch has no repository context', () => {
+    vi.stubEnv('GITHUB_REPOSITORY', '');
+
+    expect(() => getConfig()).toThrow(/Failed to resolve repository context.*pass branch as owner\/repo@branch/);
   });
 
   it('treats a branch containing slashes but no @ as a plain branch name', () => {
