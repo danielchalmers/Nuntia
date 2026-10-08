@@ -20,9 +20,9 @@ inputs:
     required: true
     default: "https://raw.githubusercontent.com/danielchalmers/Nuntia/refs/heads/main/examples/Nuntia.prompt"
   model:
-    description: "Gemini model identifier used to generate release notes."
+    description: "Model, optionally with a gemini/, anthropic/ or openai/ prefix. Blank uses the default for the API key you set (gemini-flash-latest for GEMINI_API_KEY, claude-sonnet-5-5 for ANTHROPIC_API_KEY, gpt-6.1-sol for OPENAI_API_KEY)."
     required: false
-    default: "gemini-flash-latest"
+    default: ""
   max-linked-items:
     description: "Cap on how many linked issues, PRs, or commits are fetched."
     required: false
@@ -40,9 +40,9 @@ outputs:
   release-notes-path:
     description: "Filesystem path to the generated release notes markdown."
   input-tokens:
-    description: "Gemini input token count."
+    description: "Prompt tokens, cached tokens included, as the provider counts them."
   output-tokens:
-    description: "Gemini output token count."
+    description: "Generated tokens, reasoning excluded, as the provider counts them."
 
 runs:
   using: "node24"

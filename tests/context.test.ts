@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
 import * as core from '@actions/core';
-import { buildReleaseContext } from '../src/context';
+import { buildReleaseContext, releaseInputs } from '../src/context';
 import type { CommitDetails, GitHubClient } from '../src/github';
 import type { Config } from '../src/types';
 
@@ -17,9 +17,18 @@ const BASE_CONFIG: Config = {
   baseCommit: 'a1b2c3d4',
   headCommit: 'a1b2c3d4',
   token: 'token',
-  geminiApiKey: 'gemini-key',
   promptUrl: 'https://example.com/prompt.txt',
   model: 'gemini-3.5-flash-lite',
+  resolvedModel: {
+    provider: 'gemini',
+    model: 'gemini-3.5-flash-lite',
+    tier: 'official',
+    baseUrl: 'https://generativelanguage.googleapis.com',
+    host: 'generativelanguage.googleapis.com',
+    apiKey: 'gemini-key',
+    reason: 'set by model',
+    isDefault: false,
+  },
   maxLinkedItems: 3,
   maxReferenceDepth: 2,
   maxItemLength: 5000,
@@ -411,5 +420,23 @@ describe('buildReleaseContext', () => {
     expect(context.range.changedFiles).toEqual(['a.ts', 'b.ts']);
     // The truncation must surface as a warning (captured by the mock, not leaked to stdout).
     expect(core.warning).toHaveBeenCalledWith(expect.stringMatching(/300-file compare cap/));
+  });
+});
+
+describe('releaseInputs', () => {
+  it('echoes the inputs with the resolved model ID, but not the token or the model API key', () => {
+    const inputs = releaseInputs(makeConfig());
+
+    expect(inputs).toEqual({
+      baseCommit: 'a1b2c3d4',
+      headCommit: 'a1b2c3d4',
+      branch: 'main',
+      promptUrl: 'https://example.com/prompt.txt',
+      model: 'gemini-3.5-flash-lite',
+      maxLinkedItems: 3,
+      maxReferenceDepth: 2,
+      maxItemLength: 5000,
+    });
+    expect(JSON.stringify(inputs)).not.toContain('gemini-key');
   });
 });

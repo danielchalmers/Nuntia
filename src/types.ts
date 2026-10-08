@@ -1,3 +1,5 @@
+import type { ResolvedModel } from './llm/resolve';
+
 export type Config = {
   owner: string;
   repo: string;
@@ -5,9 +7,11 @@ export type Config = {
   baseCommit: string;
   headCommit: string;
   token: string;
-  geminiApiKey: string;
   promptUrl: string;
+  // The model ID sent to the provider, as resolvedModel has it.
   model: string;
+  // The provider, key and support tier the model input resolved to.
+  resolvedModel: ResolvedModel;
   maxLinkedItems: number;
   maxReferenceDepth: number;
   maxItemLength: number;
