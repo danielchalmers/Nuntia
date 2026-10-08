@@ -350,6 +350,37 @@ describe('Chat Completions responses', () => {
     })
   })
 
+  // Release notes for reasoning-model tooling quote the tag, and nothing may be cut from them.
+  it('keeps a </think> quoted in a text answer, on OpenAI and on a compatible host', async () => {
+    const content = '## Fixes\n- Reasoning models: strip the `</think>` tag from streamed output (#812)\n- Fix crash on save (#7)'
+    for (const client of [
+      new TestClient('test-key', respondWith(() => jsonResponse(completion({ content }))).fetch),
+      new TestClient(undefined, respondWith(() => jsonResponse(completion({ content }))).fetch, COMPATIBLE_URL),
+    ]) {
+      expect((await client.generateText(TEXT_REQUEST, 0, 1)).text).toBe(content)
+    }
+  })
+
+  it('keeps a </think> inside fenced JSON on a best-effort host', async () => {
+    const { fetch } = respondWith(() => jsonResponse(completion({ content: '```json\n{"summary":"Model output leaks a stray </think> tag","labels":["bug"]}\n```' })))
+
+    expect((await new TestClient(undefined, fetch, COMPATIBLE_URL).generateJson(JSON_REQUEST, 0, 1)).data).toEqual({
+      summary: 'Model output leaks a stray </think> tag',
+      labels: ['bug'],
+    })
+  })
+
+  it('sends explicit prompt caching on text calls to GPT-6.x only', async () => {
+    const bodyFor = async (model: string) => {
+      const { sent, fetch } = respondWith(() => jsonResponse(completion({ content: 'Notes' })))
+      await new TestClient('test-key', fetch).generateText({ ...TEXT_REQUEST, model }, 0, 1)
+      return JSON.parse(sent[0]!.body) as Record<string, unknown>
+    }
+
+    expect((await bodyFor('gpt-6.1-sol')).prompt_cache_options).toEqual({ mode: 'explicit' })
+    expect((await bodyFor('gpt-4o-mini')).prompt_cache_options).toBeUndefined()
+  })
+
   it('throws a refusal, without retrying', async () => {
     const { sent, fetch } = respondWith(() => jsonResponse(completion({ content: null, refusal: 'I can\'t help with that.' })))
 

@@ -63,7 +63,8 @@ export async function withRetries<T>(
       ordinaryFailures++;
       if (ordinaryFailures >= maxOrdinaryFailures) break;
       backoff = Math.max(1, initialBackoffMs * Math.pow(2, ordinaryFailures - 1));
-      console.warn(`Model call failed (attempt ${ordinaryFailures}/${maxOrdinaryFailures}); retrying in ${Math.round(backoff / 1000)}s: ${errorMessage(lastError)}`);
+      // One decimal place, so the 7.5s first wait isn't logged as 8s.
+      console.warn(`Model call failed (attempt ${ordinaryFailures}/${maxOrdinaryFailures}); retrying in ${Number((backoff / 1000).toFixed(1))}s: ${errorMessage(lastError)}`);
     } else {
       break;
     }
