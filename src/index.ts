@@ -20,7 +20,7 @@ async function run(): Promise<void> {
   const { systemPrompt, userPrompt } = buildPrompt(context, promptText);
   const payload = buildTextPayload(systemPrompt, userPrompt, cfg.model);
 
-  // Write the debug artifacts before calling Gemini so a failed generation still leaves them for the workflow to upload.
+  // Write the debug artifacts before calling Gemini so a failed generation still leaves them on disk for a workflow whose upload step runs on failure (e.g. `if: always()`).
   writeTextFile('artifacts/nuntia-payload.json', JSON.stringify(payload, null, 2));
   writeTextFile('artifacts/nuntia-context.json', JSON.stringify(context, null, 2));
 
