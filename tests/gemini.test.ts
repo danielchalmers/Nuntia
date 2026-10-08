@@ -1,6 +1,15 @@
-import { describe, it, expect, vi } from 'vitest';
+import { createServer, type IncomingHttpHeaders } from 'node:http';
+import type { AddressInfo } from 'node:net';
+import { afterAll, beforeAll, describe, it, expect, vi } from 'vitest';
 import { ApiError } from '@google/genai';
+import { Agent } from 'undici';
 import { buildTextPayload, GeminiClient, GeminiResponseError } from '../src/gemini';
+
+// Record the options of every Agent, so a test can check the default dispatcher, while each Agent still works for real.
+vi.mock('undici', async (importActual) => {
+  const actual = await importActual<typeof import('undici')>();
+  return { ...actual, Agent: vi.fn(function (options?: Agent.Options) { return new actual.Agent(options); }) };
+});
 
 const PAYLOAD = buildTextPayload('system', 'user', 'gemini-flash-latest');
 
@@ -99,6 +108,19 @@ describe('GeminiClient.generateText', () => {
     expect(generateContent).toHaveBeenCalledTimes(2);
   });
 
+  it('names the cause that fetch hides behind "fetch failed"', async () => {
+    const cause = Object.assign(new Error('Headers Timeout Error'), { code: 'UND_ERR_HEADERS_TIMEOUT' });
+    const client = makeClient(vi.fn().mockRejectedValue(Object.assign(new TypeError('fetch failed'), { cause })));
+
+    await expect(client.generateText(PAYLOAD, 0, 1)).rejects.toThrow('fetch failed (UND_ERR_HEADERS_TIMEOUT) (1 attempts)');
+  });
+
+  it('names the deadline when the request is aborted for taking too long', async () => {
+    const client = makeClient(vi.fn().mockRejectedValue(new DOMException('This operation was aborted', 'AbortError')));
+
+    await expect(client.generateText(PAYLOAD, 0, 1)).rejects.toThrow('Gemini did not respond within 600s (1 attempts)');
+  });
+
   // Errors that can never succeed on a retry: one attempt, and the message must point at the input to fix.
   it.each([
     ['404, naming the model input', { message: 'models/gemini-flash-latets is not found', status: 404 }, /model "gemini-flash-latest".*"model" input/s],
@@ -185,5 +207,81 @@ describe('GeminiClient.generateText', () => {
 
     const exhausted = makeClient(vi.fn().mockRejectedValue(new ApiError({ message: 'Unavailable', status: 503 })));
     await expect(exhausted.generateText(PAYLOAD, 0, 1)).rejects.toBeInstanceOf(GeminiResponseError);
+  });
+});
+
+// Real requests to a local stand-in for Gemini that is slow to send response headers, as a busy model is.
+describe('GeminiClient over HTTP', () => {
+  // undici checks header timeouts on a coarse timer that can fire about a second late, so the server waits well past a short timeout.
+  const HEADERS_DELAY_MS = 2500;
+  let lastHeaders: IncomingHttpHeaders | undefined;
+  let baseUrl = '';
+  const server = createServer((req, res) => {
+    lastHeaders = req.headers;
+    req.resume();
+    setTimeout(() => {
+      if (res.destroyed) return;
+      res.writeHead(200, { 'Content-Type': 'application/json' }).end(JSON.stringify(makeTextResponse('notes')));
+    }, HEADERS_DELAY_MS);
+  });
+
+  beforeAll(async () => {
+    await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
+    baseUrl = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+  });
+
+  afterAll(async () => {
+    server.closeAllConnections();
+    await new Promise(resolve => server.close(resolve));
+  });
+
+  function localPayload() {
+    return { ...PAYLOAD, config: { ...PAYLOAD.config, httpOptions: { baseUrl } } };
+  }
+
+  it('sends requests through its own dispatcher, so that dispatcher decides how long to wait for headers', async () => {
+    const dispatcher = new Agent({ headersTimeout: 100 });
+    const client = new GeminiClient('test-key', dispatcher);
+
+    try {
+      await expect(client.generateText(localPayload(), 0, 1)).rejects.toThrow('fetch failed (UND_ERR_HEADERS_TIMEOUT) (1 attempts)');
+    } finally {
+      await dispatcher.close();
+    }
+  });
+
+  it('turns off the headers and body timeouts by default and tells Gemini about its 10-minute deadline', async () => {
+    const client = new GeminiClient('test-key');
+    // Waiting out undici's five-minute defaults would make the test far too slow, so check the default dispatcher turns them off.
+    expect(vi.mocked(Agent).mock.lastCall).toEqual([{ headersTimeout: 0, bodyTimeout: 0 }]);
+
+    const result = await client.generateText(localPayload(), 0, 1);
+
+    expect(result).toEqual({ text: 'notes', inputTokens: 10, outputTokens: 20 });
+    expect(lastHeaders?.['x-server-timeout']).toBe('600');
+  });
+
+  // Node's built-in fetch only honors proxy variables with NODE_USE_ENV_PROXY=1, and Gemini traffic must keep doing the same.
+  it('uses the proxy from the environment when NODE_USE_ENV_PROXY=1', async () => {
+    const tunnels: string[] = [];
+    const proxy = createServer();
+    proxy.on('connect', (req, socket) => {
+      tunnels.push(req.url ?? '');
+      socket.end('HTTP/1.1 403 Forbidden\r\n\r\n');
+    });
+    await new Promise<void>(resolve => proxy.listen(0, '127.0.0.1', resolve));
+
+    try {
+      vi.stubEnv('http_proxy', `http://127.0.0.1:${(proxy.address() as AddressInfo).port}`);
+      vi.stubEnv('no_proxy', '');
+      vi.stubEnv('NODE_USE_ENV_PROXY', '1');
+      const client = new GeminiClient('test-key');
+
+      await expect(client.generateText(localPayload(), 0, 1)).rejects.toThrow('fetch failed');
+      expect(tunnels).toEqual([new URL(baseUrl).host]);
+    } finally {
+      vi.unstubAllEnvs();
+      proxy.close();
+    }
   });
 });
