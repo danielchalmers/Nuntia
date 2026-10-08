@@ -173,8 +173,9 @@ describe('ChatClient errors', () => {
   it.each([
     [401, { error: { message: 'Incorrect API key provided' } }, ' Check OPENAI_API_KEY.'],
     [400, [{ error: { code: 400, message: 'API key not valid. Please pass a valid API key.', status: 'INVALID_ARGUMENT' } }], ' Check OPENAI_API_KEY.'],
-    [404, { error: { message: 'The model `nope` does not exist' } }, ' Check the model name, and the path in OPENAI_BASE_URL if it is set.'],
-    [400, [{ error: { code: 400, message: 'API Key not found. Please pass a valid API key.', status: 'INVALID_ARGUMENT' } }], ' Check OPENAI_API_KEY.'],
+    [404, { error: { message: 'The model `nope` does not exist' } }, ' Check the model name.'],
+    // How Gemini's Chat Completions endpoint answered a bad key.
+    [400, [{ error: { code: 400, message: 'Please pass a valid API key', status: 'INVALID_ARGUMENT' } }], ' Check OPENAI_API_KEY.'],
     [429, { error: { message: 'You exceeded your current quota', code: 'insufficient_quota' } }, ' Check the account\'s billing.'],
   ])('fails at once on HTTP %i, which every later call would hit too', async (status, body, hint) => {
     const fetch = stubFetch(error(status, body))
@@ -193,6 +194,16 @@ describe('ChatClient errors', () => {
 
     expect(failure).toMatchObject({ kind: 'capacity' })
     expect(sleep.mock.calls.map(([ms]) => ms)).toEqual([30000, 20000, 40000, 60000, 60000, 60000])
+  })
+
+  it('points an unknown model on OPENAI_BASE_URL at its path too', async () => {
+    const fetch = stubFetch(error(404, 'Not Found'))
+    const client = new ChatClient({ baseUrl: 'https://llm.example.com/api', host: 'llm.example.com', apiKey: 'test-key', keyName: 'OPENAI_API_KEY' }, fetch)
+
+    await expect(client.generateJson(REQUEST, data => data)).rejects.toMatchObject({
+      kind: 'fatal',
+      message: 'llm.example.com returned HTTP 404: Not Found Check the model name and the OPENAI_BASE_URL path.',
+    })
   })
 
   it('puts a pretty-printed error body on one line', async () => {

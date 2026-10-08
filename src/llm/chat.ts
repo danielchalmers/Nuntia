@@ -48,12 +48,14 @@ const CAPACITY_RETRIES = 6;
 
 // Hosts that enforce response_format. Anywhere else, such as Claude's compatibility layer, the schema is also written into the prompt.
 const SCHEMA_ENFORCING_HOSTS = new Set(['api.openai.com', 'generativelanguage.googleapis.com']);
+const BUILT_IN_HOSTS = new Set([...SCHEMA_ENFORCING_HOSTS, 'api.anthropic.com']);
 
 // Request parameters a host may reject. Each one a host rejects is left off for the rest of the run.
 type OptionalParameter = 'response_format' | 'reasoning_effort';
 
 const BILLING_ERROR = /insufficient_quota|credit.balance|spend.limit|usage.limit/i;
-const API_KEY_ERROR = /api.?key[^"]*(invalid|not valid|not found|expired|incorrect)|(invalid|incorrect)[^"]*api.?key/i;
+// Gemini answers a bad key with a 400 rather than a 401, worded differently by each of its APIs.
+const API_KEY_ERROR = /api.?key/i;
 const CAPACITY_ERROR = /\b(UNAVAILABLE|RESOURCE_EXHAUSTED|overloaded_error)\b/;
 
 // Message-only form, for warnings where a stack would be noise.
@@ -78,9 +80,9 @@ export function createModelFetch(dispatcherTimeoutMs = 0): Fetch {
   return modelFetch as Fetch;
 }
 
-function classify(status: number, body: string, keyName: string): { kind: FailureKind; hint: string } {
-  if (status === 401 || status === 403 || (status === 400 && API_KEY_ERROR.test(body))) return { kind: 'fatal', hint: ` Check ${keyName}.` };
-  if (status === 404) return { kind: 'fatal', hint: ' Check the model name, and the path in OPENAI_BASE_URL if it is set.' };
+function classify(status: number, body: string, endpoint: Pick<Endpoint, 'host' | 'keyName'>): { kind: FailureKind; hint: string } {
+  if (status === 401 || status === 403 || (status === 400 && API_KEY_ERROR.test(body))) return { kind: 'fatal', hint: ` Check ${endpoint.keyName}.` };
+  if (status === 404) return { kind: 'fatal', hint: BUILT_IN_HOSTS.has(endpoint.host) ? ' Check the model name.' : ' Check the model name and the OPENAI_BASE_URL path.' };
   if (status === 402 || ((status === 400 || status === 429) && BILLING_ERROR.test(body))) return { kind: 'fatal', hint: ' Check the account\'s billing.' };
   if (status === 429 || status === 503 || status === 529 || CAPACITY_ERROR.test(body)) return { kind: 'capacity', hint: '' };
   // A request timeout or a conflict can succeed when sent again unchanged.
@@ -219,7 +221,7 @@ export class ChatClient {
   }
 
   private async post(body: Record<string, unknown>): Promise<unknown> {
-    const { baseUrl, host, apiKey, keyName } = this.endpoint;
+    const { baseUrl, host, apiKey } = this.endpoint;
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), MODEL_TIMEOUT_MS);
     timer.unref();
@@ -239,7 +241,7 @@ export class ChatClient {
       if (!response.ok) {
         // OpenAI pretty-prints its error bodies, and a log annotation reads better on one line.
         const text = (await response.text()).replace(/\s+/g, ' ').trim().slice(0, 2000);
-        const { kind, hint } = classify(response.status, text, keyName);
+        const { kind, hint } = classify(response.status, text, this.endpoint);
         const retryAfter = response.headers.get('retry-after')?.trim() ?? '';
         throw new ModelError(`${host} returned HTTP ${response.status}: ${text}${hint}`, kind, /^\d+$/.test(retryAfter) ? Number(retryAfter) * 1000 : 0);
       }
