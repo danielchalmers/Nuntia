@@ -71,6 +71,10 @@ function classifyError(err: unknown, model: string): { retryable: boolean; messa
 
   // No HTTP status means the request never got an answer (DNS failure, reset connection, timeout).
   if (status === undefined) {
+    // genai aborts the request when REQUEST_TIMEOUT_MS runs out, and the abort error itself says nothing about a deadline.
+    if (err instanceof Error && err.name === 'AbortError') {
+      return { retryable: true, message: `Gemini did not respond within ${REQUEST_TIMEOUT_MS / 1000}s` };
+    }
     const code = causeCodeOf(err);
     return { retryable: true, message: code ? `${detail} (${code})` : detail };
   }

@@ -5,6 +5,12 @@ import { ApiError } from '@google/genai';
 import { Agent } from 'undici';
 import { buildTextPayload, GeminiClient, GeminiResponseError } from '../src/gemini';
 
+// Record the options of every Agent, so a test can check the default dispatcher, while each Agent still works for real.
+vi.mock('undici', async (importActual) => {
+  const actual = await importActual<typeof import('undici')>();
+  return { ...actual, Agent: vi.fn(function (options?: Agent.Options) { return new actual.Agent(options); }) };
+});
+
 const PAYLOAD = buildTextPayload('system', 'user', 'gemini-flash-latest');
 
 function makeTextResponse(text: string) {
@@ -107,6 +113,12 @@ describe('GeminiClient.generateText', () => {
     const client = makeClient(vi.fn().mockRejectedValue(Object.assign(new TypeError('fetch failed'), { cause })));
 
     await expect(client.generateText(PAYLOAD, 0, 1)).rejects.toThrow('fetch failed (UND_ERR_HEADERS_TIMEOUT) (1 attempts)');
+  });
+
+  it('names the deadline when the request is aborted for taking too long', async () => {
+    const client = makeClient(vi.fn().mockRejectedValue(new DOMException('This operation was aborted', 'AbortError')));
+
+    await expect(client.generateText(PAYLOAD, 0, 1)).rejects.toThrow('Gemini did not respond within 600s (1 attempts)');
   });
 
   // Errors that can never succeed on a retry: one attempt, and the message must point at the input to fix.
@@ -237,8 +249,10 @@ describe('GeminiClient over HTTP', () => {
     }
   });
 
-  it('waits for slow headers by default and tells Gemini about its 10-minute deadline', async () => {
+  it('turns off the headers and body timeouts by default and tells Gemini about its 10-minute deadline', async () => {
     const client = new GeminiClient('test-key');
+    // Waiting out undici's five-minute defaults would make the test far too slow, so check the default dispatcher turns them off.
+    expect(vi.mocked(Agent).mock.lastCall).toEqual([{ headersTimeout: 0, bodyTimeout: 0 }]);
 
     const result = await client.generateText(localPayload(), 0, 1);
 
