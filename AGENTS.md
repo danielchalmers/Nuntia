@@ -88,12 +88,10 @@ npm test
 
 ## Shared Model Layer
 
-`src/llm/` (model resolution, transport, retries, error classification, usage, and the Gemini, Claude, and Chat Completions adapters) and `tests/llm/` are copied verbatim from [AutoTriage](https://github.com/danielchalmers/AutoTriage), which owns them.
+`src/llm/` (`endpoint.ts` picks the Chat Completions endpoint and key for the model input, and `chat.ts` is the one client every provider goes through) and `tests/llm/` are copied verbatim from [AutoTriage](https://github.com/danielchalmers/AutoTriage), which owns them.
 
 - Never edit them here. Make the change in AutoTriage, then copy both folders over in a paired PR that names the AutoTriage commit, and check that `diff -r` against that commit is empty.
-- `tests/llmShared.test.ts` pins `src/llm/` to AutoTriage's content hash, so update its `PINNED_HASH` to AutoTriage's when copying.
-- `src/llm/` imports only its own files and `undici`. Nuntia's own wiring (default models, failure messages, the text call) lives in `src/env.ts` and `src/model.ts`.
-- `tests/fixtures/gemini-text-request.json` holds the Gemini request and outputs recorded from `@google/genai` before the shared layer replaced it. With only `GEMINI_API_KEY` set, the request must keep matching it byte for byte.
+- Nuntia's own wiring (the default models and the text call) lives in `src/env.ts` and `src/index.ts`.
 
 ## Building the Project
 
@@ -188,7 +186,7 @@ The action is defined in `action.yml` and runs from `dist/index.js`. Key points:
 The action writes these files to the `artifacts/` directory during execution:
 
 - `artifacts/nuntia-release-notes.md` - Generated release notes output
-- `artifacts/nuntia-payload.json` - The model and both prompts sent, in the shape `@google/genai` took (debug)
+- `artifacts/nuntia-payload.json` - The model and both prompts sent (debug)
 - `artifacts/nuntia-context.json` - Resolved release context (debug)
 
 The action does not upload them itself (that would require bundling `@actions/artifact`, whose transitive Azure SDK is not byte-reproducible across OSes and breaks the dist check). Upload them from your workflow with `actions/upload-artifact` and `path: artifacts`.
@@ -205,7 +203,7 @@ The action does not upload them itself (that would require bundling `@actions/ar
 ### Test Failures
 
 **Issue**: A test tries to reach GitHub, a model API, or the network
-- Tests must not depend on real services; mock the client (see the `makeClient` helpers in `tests/`), stub `fetch` with `vi.stubGlobal`, or point the model client at a local server (see `tests/model.test.ts`)
+- Tests must not depend on real services; mock the client (see the `makeClient` helpers in `tests/`), stub `fetch` with `vi.stubGlobal`, or point the model client at a local server (see `tests/llm/chat.test.ts`)
 
 ## Best Practices
 

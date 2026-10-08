@@ -1,6 +1,6 @@
 import * as core from '@actions/core';
 import * as github from '@actions/github';
-import { ModelResolutionError, resolveModel, type ModelEnv, type ProviderId, type ResolvedModel } from './llm/resolve';
+import { resolveModel, type ModelEnv, type ProviderId } from './llm/endpoint';
 import type { Config } from './types';
 
 // The model each key gets when the model input is blank.
@@ -11,7 +11,6 @@ const DEFAULT_MODELS: Record<ProviderId, string> = {
   openai: 'gpt-6.1-sol',
 };
 
-const MISSING_KEY_ERROR = /which needs \w+_API_KEY, and it is not set/;
 
 function parseNumber(input: string, fallback: number): number {
   const value = Number(input);
@@ -77,7 +76,6 @@ function readModelEnv(): ModelEnv {
     ANTHROPIC_API_KEY: process.env.ANTHROPIC_API_KEY,
     OPENAI_API_KEY: process.env.OPENAI_API_KEY,
     OPENAI_BASE_URL: process.env.OPENAI_BASE_URL,
-    GOOGLE_GEMINI_BASE_URL: process.env.GOOGLE_GEMINI_BASE_URL,
   };
   for (const key of [env.GEMINI_API_KEY, env.ANTHROPIC_API_KEY, env.OPENAI_API_KEY]) {
     if (key?.trim()) core.setSecret(key.trim());
@@ -85,27 +83,16 @@ function readModelEnv(): ModelEnv {
   return env;
 }
 
-// A workflow_dispatch input with a Gemini default keeps passing that model after a workflow switches keys, so the missing-key error also says how to fix the input.
-function resolveConfiguredModel(): ResolvedModel {
-  try {
-    return resolveModel({ input: 'model', value: core.getInput('model'), env: readModelEnv(), defaults: DEFAULT_MODELS });
-  } catch (err) {
-    if (err instanceof ModelResolutionError && MISSING_KEY_ERROR.test(err.message)) {
-      throw new ModelResolutionError(`${err.message} If the model comes from a workflow_dispatch input, change that input's default to "" and set required: false, so the default for the key you set is used.`);
-    }
-    throw err;
-  }
-}
 
 /**
  * Resolve runtime config.
- * Throws early with actionable messages if GITHUB_TOKEN is missing, the model input can't be resolved to a provider with its key, or repo context is absent.
+ * Throws early with actionable messages if GITHUB_TOKEN is missing, no model API key is set, or repo context is absent.
  */
 export function getConfig(): Config {
   const token = process.env.GITHUB_TOKEN || '';
 
   if (!token) throw new Error('GITHUB_TOKEN missing (add: secrets.GITHUB_TOKEN).');
-  const resolvedModel = resolveConfiguredModel();
+  const endpoint = resolveModel('model', core.getInput('model'), readModelEnv(), DEFAULT_MODELS);
 
   const baseCommit = requireInput('base-commit');
   const headCommit = requireInput('head-commit');
@@ -125,8 +112,8 @@ export function getConfig(): Config {
     headCommit,
     token,
     promptUrl,
-    model: resolvedModel.model,
-    resolvedModel,
+    model: endpoint.model,
+    endpoint,
     maxLinkedItems,
     maxReferenceDepth,
     maxItemLength,

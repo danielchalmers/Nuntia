@@ -1,4 +1,4 @@
-import type { ResolvedModel } from './llm/resolve';
+import type { Endpoint } from './llm/endpoint';
 
 export type Config = {
   owner: string;
@@ -9,7 +9,7 @@ export type Config = {
   token: string;
   promptUrl: string;
   model: string;
-  resolvedModel: ResolvedModel;
+  endpoint: Endpoint;
   maxLinkedItems: number;
   maxReferenceDepth: number;
   maxItemLength: number;

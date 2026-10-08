@@ -33,9 +33,11 @@ vi.mock('../src/prompt', async (importActual) => ({
   ...(await importActual<typeof import('../src/prompt')>()),
   fetchPrompt: mocks.fetchPrompt,
 }));
-vi.mock('../src/model', async (importActual) => ({
-  ...(await importActual<typeof import('../src/model')>()),
-  createModelClient: () => ({ generateText: mocks.generateText }),
+vi.mock('../src/llm/chat', async (importActual) => ({
+  ...(await importActual<typeof import('../src/llm/chat')>()),
+  ChatClient: class {
+    generateText = mocks.generateText;
+  },
 }));
 
 const CONFIG: Config = {
@@ -47,14 +49,13 @@ const CONFIG: Config = {
   token: 'token',
   promptUrl: 'https://example.com/prompt.txt',
   model: 'gemini-flash-latest',
-  resolvedModel: {
+  endpoint: {
     provider: 'gemini',
     model: 'gemini-flash-latest',
-    tier: 'official',
-    baseUrl: 'https://generativelanguage.googleapis.com',
+    baseUrl: 'https://generativelanguage.googleapis.com/v1beta/openai',
     host: 'generativelanguage.googleapis.com',
     apiKey: 'gemini-key',
-    reason: 'default for GEMINI_API_KEY',
+    keyName: 'GEMINI_API_KEY',
     isDefault: true,
   },
   maxLinkedItems: 5,
@@ -111,7 +112,7 @@ beforeEach(() => {
     inputTokens: 1200,
     cachedInputTokens: 0,
     outputTokens: 340,
-    thoughtsTokens: 900,
+    reasoningTokens: 900,
   });
 });
 
@@ -137,19 +138,17 @@ describe('Nuntia action entry point', () => {
     await runAction();
 
     expect(mocks.fetchPrompt).toHaveBeenCalledWith(CONFIG.promptUrl);
-    const [request, maxRetries] = mocks.generateText.mock.calls[0]!;
-    // A text request carries no schema or reasoning settings, so every provider runs at its defaults.
+    const [request] = mocks.generateText.mock.calls[0]!;
     expect(Object.keys(request)).toEqual(['model', 'systemPrompt', 'userPrompt']);
     expect(request.model).toBe('gemini-flash-latest');
     expect(request.systemPrompt).toContain('Write release notes.');
     expect(request.userPrompt).toContain('"totalCommits": 2');
-    expect(maxRetries).toBe(2);
   });
 
-  it('logs the model, its provider, and its support tier', async () => {
+  it('logs the model and its host', async () => {
     await runAction();
 
-    expect(console.log).toHaveBeenCalledWith('Model: gemini-flash-latest via gemini [official] — default for GEMINI_API_KEY');
+    expect(console.log).toHaveBeenCalledWith('Model: gemini-flash-latest at generativelanguage.googleapis.com (default for GEMINI_API_KEY)');
   });
 
   it('reports generated tokens without reasoning as output-tokens', async () => {
@@ -163,9 +162,7 @@ describe('Nuntia action entry point', () => {
 
     const artifacts = path.join(tempDir, 'artifacts');
     expect(JSON.parse(fs.readFileSync(path.join(artifacts, 'nuntia-context.json'), 'utf8'))).toEqual(CONTEXT);
-    expect(JSON.parse(fs.readFileSync(path.join(artifacts, 'nuntia-payload.json'), 'utf8'))).toMatchObject({
-      model: 'gemini-flash-latest',
-    });
+    expect(JSON.parse(fs.readFileSync(path.join(artifacts, 'nuntia-payload.json'), 'utf8'))).toEqual(mocks.generateText.mock.calls[0]![0]);
   });
 
   it('skips the step summary outside a workflow run', async () => {
@@ -196,12 +193,12 @@ describe('Nuntia action entry point', () => {
 
   it('keeps the debug artifacts but writes no notes, summary, or outputs when generation fails', async () => {
     vi.stubEnv('GITHUB_STEP_SUMMARY', path.join(tempDir, 'summary.md'));
-    mocks.generateText.mockRejectedValue(new Error('Gemini stopped at the output token limit (finishReason MAX_TOKENS)'));
+    mocks.generateText.mockRejectedValue(new Error('generativelanguage.googleapis.com stopped the reply at the output token limit'));
 
     await runAction();
 
     const artifacts = path.join(tempDir, 'artifacts');
-    expect(mocks.setFailed).toHaveBeenCalledWith('Gemini stopped at the output token limit (finishReason MAX_TOKENS)');
+    expect(mocks.setFailed).toHaveBeenCalledWith('generativelanguage.googleapis.com stopped the reply at the output token limit');
     expect(mocks.setOutput).not.toHaveBeenCalled();
     expect(mocks.summary.write).not.toHaveBeenCalled();
     expect(fs.existsSync(path.join(artifacts, 'nuntia-release-notes.md'))).toBe(false);

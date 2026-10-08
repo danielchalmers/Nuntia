@@ -28,7 +28,6 @@ beforeEach(() => {
   vi.stubEnv('ANTHROPIC_API_KEY', '');
   vi.stubEnv('OPENAI_API_KEY', '');
   vi.stubEnv('OPENAI_BASE_URL', '');
-  vi.stubEnv('GOOGLE_GEMINI_BASE_URL', '');
   vi.stubEnv('GITHUB_REPOSITORY', 'acme/widgets');
   // On GitHub Actions the context loads the triggering event's payload at import; clear it so it can't stand in for GITHUB_REPOSITORY.
   github.context.payload = {};
@@ -51,14 +50,13 @@ describe('getConfig', () => {
       token: 'token',
       promptUrl: '',
       model: 'gemini-flash-latest',
-      resolvedModel: {
+      endpoint: {
         provider: 'gemini',
         model: 'gemini-flash-latest',
-        tier: 'official',
-        baseUrl: 'https://generativelanguage.googleapis.com',
+        baseUrl: 'https://generativelanguage.googleapis.com/v1beta/openai',
         host: 'generativelanguage.googleapis.com',
         apiKey: 'gemini-key',
-        reason: 'default for GEMINI_API_KEY',
+        keyName: 'GEMINI_API_KEY',
         isDefault: true,
       },
       maxLinkedItems: 5,
@@ -76,7 +74,7 @@ describe('getConfig', () => {
   it('fails fast, naming every key, when no model API key is set', () => {
     vi.stubEnv('GEMINI_API_KEY', '');
 
-    expect(() => getConfig()).toThrow(/model is blank and no model API key is set. Add GEMINI_API_KEY, ANTHROPIC_API_KEY or OPENAI_API_KEY/);
+    expect(() => getConfig()).toThrow(/No model API key is set. Add GEMINI_API_KEY, ANTHROPIC_API_KEY or OPENAI_API_KEY/);
   });
 
   it.each([
@@ -86,7 +84,7 @@ describe('getConfig', () => {
     vi.stubEnv('GEMINI_API_KEY', '');
     vi.stubEnv(name, 'other-key');
 
-    expect(getConfig()).toMatchObject({ model, resolvedModel: { provider, model, tier: 'official', apiKey: 'other-key', isDefault: true } });
+    expect(getConfig()).toMatchObject({ model, endpoint: { provider, model, apiKey: 'other-key', isDefault: true } });
   });
 
   it('masks every model API key that is set', () => {
@@ -97,22 +95,14 @@ describe('getConfig', () => {
     expect(mocks.setSecret.mock.calls).toEqual([['gemini-key'], ['anthropic-key']]);
   });
 
-  it('sends the model ID without the prefix that picked the provider', () => {
+  it('picks the provider from the model name when several keys are set', () => {
     vi.stubEnv('ANTHROPIC_API_KEY', 'anthropic-key');
-    setInputs({ ...REQUIRED_INPUTS, model: 'anthropic/claude-opus-5-5' });
+    setInputs({ ...REQUIRED_INPUTS, model: 'claude-opus-5-5' });
 
-    expect(getConfig()).toMatchObject({ model: 'claude-opus-5-5', resolvedModel: { provider: 'anthropic', reason: 'set by model' } });
+    expect(getConfig()).toMatchObject({ model: 'claude-opus-5-5', endpoint: { provider: 'anthropic', apiKey: 'anthropic-key' } });
   });
 
-  it('says how to fix a dispatch input that still passes a Gemini model after switching keys', () => {
-    vi.stubEnv('GEMINI_API_KEY', '');
-    vi.stubEnv('ANTHROPIC_API_KEY', 'anthropic-key');
-    setInputs({ ...REQUIRED_INPUTS, model: 'gemini-3.1-pro-preview' });
-
-    expect(() => getConfig()).toThrow(/needs GEMINI_API_KEY, and it is not set..*change that input's default to "" and set required: false/);
-  });
-
-  it('sends a model to OPENAI_BASE_URL unchanged and names the host in the route', () => {
+  it('sends a model to OPENAI_BASE_URL unchanged', () => {
     vi.stubEnv('GEMINI_API_KEY', '');
     vi.stubEnv('OPENAI_API_KEY', 'router-key');
     vi.stubEnv('OPENAI_BASE_URL', 'https://openrouter.ai/api/v1/');
@@ -120,7 +110,7 @@ describe('getConfig', () => {
 
     expect(getConfig()).toMatchObject({
       model: 'anthropic/claude-sonnet-5.5',
-      resolvedModel: { provider: 'openai', tier: 'best-effort', baseUrl: 'https://openrouter.ai/api/v1', host: 'openrouter.ai' },
+      endpoint: { provider: 'openai', baseUrl: 'https://openrouter.ai/api/v1', host: 'openrouter.ai' },
     });
   });
 
@@ -199,6 +189,6 @@ describe('getConfig', () => {
   it('passes the model and prompt URL inputs through', () => {
     setInputs({ ...REQUIRED_INPUTS, model: 'gemini-custom', 'prompt-url': 'https://example.com/p.txt' });
 
-    expect(getConfig()).toMatchObject({ model: 'gemini-custom', promptUrl: 'https://example.com/p.txt', resolvedModel: { provider: 'gemini', tier: 'best-effort' } });
+    expect(getConfig()).toMatchObject({ model: 'gemini-custom', promptUrl: 'https://example.com/p.txt', endpoint: { provider: 'gemini' } });
   });
 });
