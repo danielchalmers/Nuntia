@@ -53,7 +53,7 @@ const SCHEMA_ENFORCING_HOSTS = new Set(['api.openai.com', 'generativelanguage.go
 type OptionalParameter = 'response_format' | 'reasoning_effort';
 
 const BILLING_ERROR = /insufficient_quota|credit.balance|spend.limit|usage.limit/i;
-const API_KEY_ERROR = /api.?key[^"]*(invalid|not valid|expired|incorrect)|(invalid|incorrect)[^"]*api.?key/i;
+const API_KEY_ERROR = /api.?key[^"]*(invalid|not valid|not found|expired|incorrect)|(invalid|incorrect)[^"]*api.?key/i;
 const CAPACITY_ERROR = /\b(UNAVAILABLE|RESOURCE_EXHAUSTED|overloaded_error)\b/;
 
 // Message-only form, for warnings where a stack would be noise.
@@ -80,7 +80,7 @@ export function createModelFetch(dispatcherTimeoutMs = 0): Fetch {
 
 function classify(status: number, body: string, keyName: string): { kind: FailureKind; hint: string } {
   if (status === 401 || status === 403 || (status === 400 && API_KEY_ERROR.test(body))) return { kind: 'fatal', hint: ` Check ${keyName}.` };
-  if (status === 404) return { kind: 'fatal', hint: ' Check the model name.' };
+  if (status === 404) return { kind: 'fatal', hint: ' Check the model name, and the path in OPENAI_BASE_URL if it is set.' };
   if (status === 402 || ((status === 400 || status === 429) && BILLING_ERROR.test(body))) return { kind: 'fatal', hint: ' Check the account\'s billing.' };
   if (status === 429 || status === 503 || status === 529 || CAPACITY_ERROR.test(body)) return { kind: 'capacity', hint: '' };
   // A request timeout or a conflict can succeed when sent again unchanged.
@@ -113,26 +113,27 @@ function readReply(response: unknown, host: string): { text: string; usage: Usag
   if (!text) throw new ModelError(`${host} responded with empty text`);
 
   const usage = asRecord(asRecord(response).usage);
-  // OpenAI counts reasoning inside completion_tokens and breaks it out, while Gemini leaves it out of completion_tokens and only total_tokens includes it.
+  const completion = count(usage.completion_tokens);
+  // OpenAI counts reasoning inside completion_tokens and breaks it out. Gemini and some others leave it out of completion_tokens, so only total_tokens includes it.
+  const uncounted = Math.max(0, count(usage.total_tokens) - count(usage.prompt_tokens) - completion);
   const reported = asRecord(usage.completion_tokens_details).reasoning_tokens;
-  const reasoningTokens = typeof reported === 'number'
-    ? reported
-    : Math.max(0, count(usage.total_tokens) - count(usage.prompt_tokens) - count(usage.completion_tokens));
+  const reasoningTokens = typeof reported === 'number' ? reported : uncounted;
   return {
     text,
     usage: {
       inputTokens: count(usage.prompt_tokens),
       cachedInputTokens: count(asRecord(usage.prompt_tokens_details).cached_tokens),
-      outputTokens: Math.max(0, count(usage.completion_tokens) - count(reported)),
+      outputTokens: uncounted > 0 ? completion : Math.max(0, completion - reasoningTokens),
       reasoningTokens,
     },
   };
 }
 
-// The optional parameter a rejected request names, if any.
+// The optional parameter a rejected request names, if any: in the error's `param` field when it has one, as OpenAI-style errors do, or else anywhere in its text.
 function rejectedParameter(message: string, body: Record<string, unknown>): OptionalParameter | undefined {
+  const text = /"param"\s*:\s*"([^"]+)"/.exec(message)?.[1] ?? message;
   return (['response_format', 'reasoning_effort'] as const)
-    .find(name => name in body && (message.includes(name) || (name === 'response_format' && message.includes('json_schema'))));
+    .find(name => name in body && (text.includes(name) || (name === 'response_format' && text.includes('json_schema'))));
 }
 
 function schemaNote(schema: object): string {
@@ -236,7 +237,8 @@ export class ChatClient {
         throw new ModelError(`${host} redirected the request (HTTP ${response.status}), and redirects are not followed because the request carries the API key.`, 'permanent');
       }
       if (!response.ok) {
-        const text = (await response.text()).slice(0, 2000);
+        // OpenAI pretty-prints its error bodies, and a log annotation reads better on one line.
+        const text = (await response.text()).replace(/\s+/g, ' ').trim().slice(0, 2000);
         const { kind, hint } = classify(response.status, text, keyName);
         const retryAfter = response.headers.get('retry-after')?.trim() ?? '';
         throw new ModelError(`${host} returned HTTP ${response.status}: ${text}${hint}`, kind, /^\d+$/.test(retryAfter) ? Number(retryAfter) * 1000 : 0);

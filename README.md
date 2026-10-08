@@ -75,11 +75,11 @@ Set one model API key as a secret and map it in the step's `env`. Nuntia talks t
 
 These defaults favor quality over cost, because the notes come from one call per release and a person reviews them.
 
-- **With one key set**, `model` goes to it. With several, `gemini-*` models go to Gemini, `claude-*` models to Claude, and any other model to OpenAI or `OPENAI_BASE_URL`.
+- **With one key set**, `model` goes to it. With several, a `gemini-*` or `claude-*` model goes to Gemini or Claude when that key is set, and any other model goes to OpenAI or `OPENAI_BASE_URL`.
 - **Any OpenAI-compatible service** (OpenRouter, Azure OpenAI, Groq, Mistral, xAI, DeepSeek, Together, Fireworks, Cerebras, LiteLLM, vLLM, Ollama, ...) works by setting `OPENAI_BASE_URL` to its API base and `model` to a model it serves, such as `anthropic/claude-sonnet-5.5` on OpenRouter.
 - **A `model` input passed through from `workflow_dispatch`** keeps sending its default after you switch keys. Change that input's default to `""` and set `required: false`, as in [the example workflow](./examples/workflows/nuntia.yml), so the default for the key you set is used.
 - **The log names the model and host**, such as `Model: claude-sonnet-5-5 at api.anthropic.com (default for ANTHROPIC_API_KEY)`.
-- **Each provider runs at its default reasoning level**, and only the answer text is kept, so the model's reasoning never ends up in the notes.
+- **Each provider runs at its default reasoning level.** Reasoning that a provider returns separately, or in a `<think>` block at the start of the reply, is left out of the notes.
 - **Failures.** A bad key, an unknown model, or a billing problem fails at once and says what to check. An overloaded or rate-limited provider is retried for a few minutes. Notes cut off at the output limit, or a refusal, fail the run without writing a notes file.
 - **Your data.** Commit messages and linked issue and pull request text go to the provider you pick. Gateways such as OpenRouter forward the text to further providers.
 

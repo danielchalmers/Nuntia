@@ -99,6 +99,13 @@ describe('ChatClient requests', () => {
     expect(warn).toHaveBeenCalledTimes(2)
     expect(sleep).not.toHaveBeenCalled()
   })
+
+  it('trusts the error\'s param field over parameter names elsewhere in it', async () => {
+    const fetch = stubFetch(error(400, { error: { message: 'Invalid value for reasoning_effort and response_format: messages[1] is too long', param: 'messages' } }))
+
+    await expect(new ChatClient(OPENAI, fetch).generateJson(REQUEST, data => data)).rejects.toMatchObject({ kind: 'permanent' })
+    expect(fetch).toHaveBeenCalledOnce()
+  })
 })
 
 describe('ChatClient replies', () => {
@@ -113,12 +120,12 @@ describe('ChatClient replies', () => {
     expect(result).toEqual({ data: { ok: true }, inputTokens: 1000, cachedInputTokens: 800, outputTokens: 50, reasoningTokens: 250 })
   })
 
-  // As Gemini's endpoint reported a call with reasoning_effort: high.
-  it('reads reasoning that only total_tokens includes', async () => {
-    const fetch = stubFetch({
-      choices: [{ message: { content: '{"ok":true}' }, finish_reason: 'stop' }],
-      usage: { completion_tokens: 47, prompt_tokens: 71, total_tokens: 2008 },
-    })
+  it.each([
+    // As Gemini's endpoint reported a call with reasoning_effort: high.
+    ['only total_tokens includes', { completion_tokens: 47, prompt_tokens: 71, total_tokens: 2008 }],
+    ['is broken out but left out of completion_tokens', { completion_tokens: 47, prompt_tokens: 71, total_tokens: 2008, completion_tokens_details: { reasoning_tokens: 1890 } }],
+  ])('reads reasoning that %s', async (_case, usage) => {
+    const fetch = stubFetch({ choices: [{ message: { content: '{"ok":true}' }, finish_reason: 'stop' }], usage })
 
     const result = await new ChatClient(OPENAI, fetch).generateJson(REQUEST, data => data)
 
@@ -166,7 +173,8 @@ describe('ChatClient errors', () => {
   it.each([
     [401, { error: { message: 'Incorrect API key provided' } }, ' Check OPENAI_API_KEY.'],
     [400, [{ error: { code: 400, message: 'API key not valid. Please pass a valid API key.', status: 'INVALID_ARGUMENT' } }], ' Check OPENAI_API_KEY.'],
-    [404, { error: { message: 'The model `nope` does not exist' } }, ' Check the model name.'],
+    [404, { error: { message: 'The model `nope` does not exist' } }, ' Check the model name, and the path in OPENAI_BASE_URL if it is set.'],
+    [400, [{ error: { code: 400, message: 'API Key not found. Please pass a valid API key.', status: 'INVALID_ARGUMENT' } }], ' Check OPENAI_API_KEY.'],
     [429, { error: { message: 'You exceeded your current quota', code: 'insufficient_quota' } }, ' Check the account\'s billing.'],
   ])('fails at once on HTTP %i, which every later call would hit too', async (status, body, hint) => {
     const fetch = stubFetch(error(status, body))
@@ -185,6 +193,14 @@ describe('ChatClient errors', () => {
 
     expect(failure).toMatchObject({ kind: 'capacity' })
     expect(sleep.mock.calls.map(([ms]) => ms)).toEqual([30000, 20000, 40000, 60000, 60000, 60000])
+  })
+
+  it('puts a pretty-printed error body on one line', async () => {
+    const fetch = stubFetch(error(400, '{\n  "error": {\n    "message": "messages too long"\n  }\n}\n'))
+
+    await expect(new ChatClient(OPENAI, fetch).generateJson(REQUEST, data => data)).rejects.toMatchObject({
+      message: 'api.openai.com returned HTTP 400: { "error": { "message": "messages too long" } }',
+    })
   })
 
   it('retries a server error twice, and fails any other 4xx at once', async () => {
