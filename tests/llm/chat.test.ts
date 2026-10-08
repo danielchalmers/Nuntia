@@ -105,12 +105,24 @@ describe('ChatClient replies', () => {
   it('reads the answer and usage, with reasoning counted on its own', async () => {
     const fetch = stubFetch({
       choices: [{ message: { content: '{"ok":true}' }, finish_reason: 'stop' }],
-      usage: { prompt_tokens: 1000, prompt_tokens_details: { cached_tokens: 800 }, completion_tokens: 300, completion_tokens_details: { reasoning_tokens: 250 } },
+      usage: { prompt_tokens: 1000, prompt_tokens_details: { cached_tokens: 800 }, completion_tokens: 300, total_tokens: 1300, completion_tokens_details: { reasoning_tokens: 250 } },
     })
 
     const result = await new ChatClient(OPENAI, fetch).generateJson(REQUEST, data => data)
 
     expect(result).toEqual({ data: { ok: true }, inputTokens: 1000, cachedInputTokens: 800, outputTokens: 50, reasoningTokens: 250 })
+  })
+
+  // As Gemini's endpoint reported a call with reasoning_effort: high.
+  it('reads reasoning that only total_tokens includes', async () => {
+    const fetch = stubFetch({
+      choices: [{ message: { content: '{"ok":true}' }, finish_reason: 'stop' }],
+      usage: { completion_tokens: 47, prompt_tokens: 71, total_tokens: 2008 },
+    })
+
+    const result = await new ChatClient(OPENAI, fetch).generateJson(REQUEST, data => data)
+
+    expect(result).toMatchObject({ inputTokens: 71, outputTokens: 47, reasoningTokens: 1890 })
   })
 
   it('takes text parts, and drops a leading <think> block and a code fence', async () => {

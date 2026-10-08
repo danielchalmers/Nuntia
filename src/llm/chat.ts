@@ -113,13 +113,17 @@ function readReply(response: unknown, host: string): { text: string; usage: Usag
   if (!text) throw new ModelError(`${host} responded with empty text`);
 
   const usage = asRecord(asRecord(response).usage);
-  const reasoningTokens = count(asRecord(usage.completion_tokens_details).reasoning_tokens);
+  // OpenAI counts reasoning inside completion_tokens and breaks it out, while Gemini leaves it out of completion_tokens and only total_tokens includes it.
+  const reported = asRecord(usage.completion_tokens_details).reasoning_tokens;
+  const reasoningTokens = typeof reported === 'number'
+    ? reported
+    : Math.max(0, count(usage.total_tokens) - count(usage.prompt_tokens) - count(usage.completion_tokens));
   return {
     text,
     usage: {
       inputTokens: count(usage.prompt_tokens),
       cachedInputTokens: count(asRecord(usage.prompt_tokens_details).cached_tokens),
-      outputTokens: Math.max(0, count(usage.completion_tokens) - reasoningTokens),
+      outputTokens: Math.max(0, count(usage.completion_tokens) - count(reported)),
       reasoningTokens,
     },
   };
