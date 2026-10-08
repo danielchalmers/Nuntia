@@ -4,15 +4,15 @@ This document provides comprehensive instructions for AI agents and developers w
 
 ## Project Overview
 
-Nuntia is a GitHub Action that generates release notes and migration guides from a commit range. It is built with TypeScript, requires Node.js 22+ for development, and runs on Node.js 24 in GitHub Actions.
+Nuntia is a GitHub Action that generates release notes and migration guides from a commit range. It is built with TypeScript, requires Node.js 24+ for development, and runs on Node.js 24 in GitHub Actions.
 
 ## Prerequisites
 
-- **Node.js**: Version 22 or higher (specified in `package.json` engines)
+- **Node.js**: Version 24 or higher (specified in `package.json` engines)
 - **npm**: Comes bundled with Node.js
 - **Git**: For version control
 - **GitHub Token**: Required for GitHub API access (set as `GITHUB_TOKEN` environment variable)
-- **Gemini API Key**: Required for AI functionality (set as `GEMINI_API_KEY` environment variable)
+- **Model API Key**: Required for AI functionality (set `GEMINI_API_KEY`, `ANTHROPIC_API_KEY`, or `OPENAI_API_KEY`, optionally with `OPENAI_BASE_URL`)
 
 ## Repository Structure
 
@@ -22,7 +22,9 @@ Nuntia/
 ├── dist/             # Compiled output (generated, committed to repo)
 ├── examples/         # Example workflows
 ├── src/              # TypeScript source code
+│   └── llm/          # Shared model layer, copied verbatim from AutoTriage
 ├── tests/            # Test files using Vitest
+│   └── llm/          # Shared model layer tests, copied verbatim from AutoTriage
 ├── action.yml        # GitHub Action metadata
 ├── package.json      # Dependencies and scripts
 ├── tsconfig.json     # TypeScript configuration
@@ -48,8 +50,8 @@ Use `npm ci` (clean install) for reproducible builds based on `package-lock.json
 
 ### 3. Credentials
 
-Unit tests mock GitHub, Gemini, and `fetch`, so `npm test` needs no credentials or network access.
-`GITHUB_TOKEN` and `GEMINI_API_KEY` are only needed to run the action itself against real services.
+Unit tests mock GitHub and `fetch`, and model calls go to local stand-in servers, so `npm test` needs no credentials or network access beyond localhost.
+`GITHUB_TOKEN` and a model API key are only needed to run the action itself against real services.
 
 ## Development Workflow
 
@@ -83,6 +85,15 @@ npm test
 
 - Tests use Vitest with Node.js environment
 - Test files: `tests/**/*.test.ts`
+
+## Shared Model Layer
+
+`src/llm/` (model resolution, transport, retries, error classification, usage, and the Gemini, Claude, and Chat Completions adapters) and `tests/llm/` are copied verbatim from [AutoTriage](https://github.com/danielchalmers/AutoTriage), which owns them.
+
+- Never edit them here. Make the change in AutoTriage, then copy both folders over in a paired PR that names the AutoTriage commit, and check that `diff -r` against that commit is empty.
+- `tests/llmShared.test.ts` pins `src/llm/` to AutoTriage's content hash, so update its `PINNED_HASH` to AutoTriage's when copying.
+- `src/llm/` imports only its own files and `undici`. Nuntia's own wiring (default models, failure messages, the text call) lives in `src/env.ts` and `src/model.ts`.
+- `tests/fixtures/gemini-text-request.json` holds the Gemini request and outputs recorded from `@google/genai` before the shared layer replaced it. With only `GEMINI_API_KEY` set, the request must keep matching it byte for byte.
 
 ## Building the Project
 
@@ -177,7 +188,7 @@ The action is defined in `action.yml` and runs from `dist/index.js`. Key points:
 The action writes these files to the `artifacts/` directory during execution:
 
 - `artifacts/nuntia-release-notes.md` - Generated release notes output
-- `artifacts/nuntia-payload.json` - Full Gemini request payload (debug)
+- `artifacts/nuntia-payload.json` - The model and both prompts sent, in the shape `@google/genai` took (debug)
 - `artifacts/nuntia-context.json` - Resolved release context (debug)
 
 The action does not upload them itself (that would require bundling `@actions/artifact`, whose transitive Azure SDK is not byte-reproducible across OSes and breaks the dist check). Upload them from your workflow with `actions/upload-artifact` and `path: artifacts`.
@@ -187,14 +198,14 @@ The action does not upload them itself (that would require bundling `@actions/ar
 ### Build Failures
 
 **Issue**: `npm run build` fails
-- Check Node.js version: `node --version` (must be 22+)
+- Check Node.js version: `node --version` (must be 24+)
 - Clear node_modules: `rm -rf node_modules && npm ci`
 - Check TypeScript errors: `npm run typecheck`
 
 ### Test Failures
 
-**Issue**: A test tries to reach GitHub, Gemini, or the network
-- Tests must not depend on real services; mock the client (see the `makeClient` helpers in `tests/`) or stub `fetch` with `vi.stubGlobal`
+**Issue**: A test tries to reach GitHub, a model API, or the network
+- Tests must not depend on real services; mock the client (see the `makeClient` helpers in `tests/`), stub `fetch` with `vi.stubGlobal`, or point the model client at a local server (see `tests/model.test.ts`)
 
 ## Best Practices
 

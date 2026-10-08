@@ -18,9 +18,9 @@ on:
         required: true
         default: "https://raw.githubusercontent.com/danielchalmers/Nuntia/refs/heads/main/examples/Nuntia.prompt"
       model:
-        description: "Gemini model"
+        description: "Model (blank uses the default for the API key)"
         required: false
-        default: "gemini-flash-latest"
+        default: ""
 
 jobs:
   release-notes:

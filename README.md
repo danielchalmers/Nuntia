@@ -4,13 +4,13 @@
 [![Latest tag](https://img.shields.io/github/v/tag/danielchalmers/Nuntia?label=latest)](https://github.com/danielchalmers/Nuntia/tags)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](./LICENSE)
 
-Nuntia is a GitHub Action that writes release notes and migration guides from a commit range: it gathers commit messages, follows the issues, pull requests, and commits they reference, and feeds the full context to Gemini with a prompt you control. It runs on demand in your workflow with your own API key — no service to host.
+Nuntia is a GitHub Action that writes release notes and migration guides from a commit range: it gathers commit messages, follows the issues, pull requests, and commits they reference, and feeds the full context to the model you pick (Gemini, Claude, OpenAI, or any OpenAI-compatible service) with a prompt you control. It runs on demand in your workflow with your own API key — no service to host.
 
 The default prompt produces a themed changelog rather than a per-commit log: a highlights section, an upgrading section with breaking changes and before/after diffs, and net changes grouped by feature area with trailing reference links. The prompt is fetched from a URL, so you can swap in your own format without forking the action.
 
 ## Quick start
 
-1. Add a `GEMINI_API_KEY` secret to your repository or organization ([get a key](https://aistudio.google.com/apikey)).
+1. Add a `GEMINI_API_KEY` secret to your repository or organization ([get a key](https://aistudio.google.com/apikey)). To use Claude or OpenAI instead, add `ANTHROPIC_API_KEY` or `OPENAI_API_KEY` and map it in the step's `env` in place of `GEMINI_API_KEY` (see [Models](#models)).
 2. Add a manually-triggered workflow, like the ready-to-use [`examples/workflows/nuntia.yml`](./examples/workflows/nuntia.yml):
 
 ```yaml
@@ -59,8 +59,28 @@ jobs:
 
 - Resolves the inclusive commit range from the base commit, head commit, and branch.
 - Scrapes commit messages and follows linked issues, PRs, and commits, with configurable depth and caps.
-- Sends the aggregated context to Gemini using the prompt fetched from `prompt-url`.
+- Sends the aggregated context to the model using the prompt fetched from `prompt-url`.
 - Writes the release notes markdown (plus payload/context debug files) to the `artifacts/` directory for your workflow to upload.
+
+## Models
+
+Nuntia picks the provider from the API key you set, with the same rules as [AutoTriage](https://github.com/danielchalmers/AutoTriage#models), so one set of secrets works for both actions. `model` is only needed to pick a model other than that key's default.
+
+| API key | Default when `model` is blank |
+| --- | --- |
+| `GEMINI_API_KEY` | `gemini-flash-latest` |
+| `ANTHROPIC_API_KEY` | `claude-sonnet-5-5` |
+| `OPENAI_API_KEY` | `gpt-6.1-sol` |
+| `OPENAI_BASE_URL` (`OPENAI_API_KEY` optional) | none, so set `model` |
+
+These defaults favor quality over cost, because the notes come from one call per release and a person reviews them.
+
+- **Any OpenAI-compatible service** (OpenRouter, Azure OpenAI, Groq, Mistral, xAI, DeepSeek, Together, Fireworks, Cerebras, LiteLLM, vLLM, Ollama, ...) works by setting `OPENAI_BASE_URL` to its API base and `model` to a model it serves, such as `anthropic/claude-sonnet-5.5` on OpenRouter. AutoTriage's [Models](https://github.com/danielchalmers/AutoTriage#models) section has the details, including the support tiers.
+- **A `model` input passed through from `workflow_dispatch`** keeps sending its default after you switch keys. Change that input's default to `""` and set `required: false`, as in [the example workflow](./examples/workflows/nuntia.yml), so the default for the key you set is used.
+- **The log states the choice**, such as `Model: claude-sonnet-5-5 via anthropic [official] — default for ANTHROPIC_API_KEY`.
+- **Each provider runs at its default reasoning level**, and only the answer text is kept, so the model's thoughts never end up in the notes.
+- **Failures.** A bad key, an unknown model, or a billing problem fails at once and names the secret or input to fix. An overloaded or rate-limited provider is retried for a few minutes. Notes cut off at the output limit, or a refusal, fail the run without writing a notes file.
+- **Your data.** Commit messages and linked issue and pull request text go to the provider you pick. OpenAI-compatible calls send `store: false`. Gateways such as OpenRouter forward the text to further providers.
 
 ## Inputs
 
@@ -70,7 +90,7 @@ jobs:
 | `head-commit` | End commit SHA (inclusive). | Required |
 | `branch` | Branch name (`branch` or `owner/repo@branch`). | Required |
 | `prompt-url` | URL to raw prompt template content. | [example prompt](./examples/Nuntia.prompt) |
-| `model` | Gemini model identifier. | `gemini-flash-latest` |
+| `model` | Model that writes the notes, optionally with a `gemini/`, `anthropic/` or `openai/` prefix. | The default for the API key you set (see [Models](#models)) |
 | `max-linked-items` | Maximum linked issues/PRs/commits to fetch. | `5` |
 | `max-reference-depth` | Depth to follow references inside linked descriptions. | `2` |
 | `max-item-length` | Maximum length for each commit message and linked item title/body field. | `5000` |
@@ -80,5 +100,7 @@ jobs:
 | Output | Purpose |
 | --- | --- |
 | `release-notes-path` | Filesystem path to the release notes markdown. |
-| `input-tokens` | Gemini prompt token count. |
-| `output-tokens` | Gemini output token count. |
+| `input-tokens` | Prompt tokens, cached tokens included. |
+| `output-tokens` | Generated tokens, reasoning excluded. |
+
+Token counts follow each provider's own counting, so they aren't comparable across providers.

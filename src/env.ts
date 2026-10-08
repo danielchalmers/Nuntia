@@ -1,6 +1,18 @@
 import * as core from '@actions/core';
 import * as github from '@actions/github';
+import { ModelResolutionError, resolveModel, type ModelEnv, type ProviderId, type ResolvedModel } from './llm/resolve';
 import type { Config } from './types';
+
+// The model each key gets when the model input is blank. GEMINI_API_KEY keeps the default Nuntia had before other providers were supported.
+// They favor quality over cost, because release notes are one call per release and a person reviews them.
+const DEFAULT_MODELS: Record<ProviderId, string> = {
+  gemini: 'gemini-flash-latest',
+  anthropic: 'claude-sonnet-5-5',
+  openai: 'gpt-6.1-sol',
+};
+
+// The shared resolution error for a model whose provider key is not set.
+const MISSING_KEY_ERROR = /which needs \w+_API_KEY, and it is not set/;
 
 function parseNumber(input: string, fallback: number): number {
   const value = Number(input);
@@ -61,15 +73,47 @@ function resolveWorkflowRepository(): Repository {
 }
 
 /**
+ * The model API settings, read only from the variables resolution documents.
+ * Keys are masked so a later log line can't print them.
+ */
+function readModelEnv(): ModelEnv {
+  const env: ModelEnv = {
+    GEMINI_API_KEY: process.env.GEMINI_API_KEY,
+    ANTHROPIC_API_KEY: process.env.ANTHROPIC_API_KEY,
+    OPENAI_API_KEY: process.env.OPENAI_API_KEY,
+    OPENAI_BASE_URL: process.env.OPENAI_BASE_URL,
+    GOOGLE_GEMINI_BASE_URL: process.env.GOOGLE_GEMINI_BASE_URL,
+  };
+  for (const key of [env.GEMINI_API_KEY, env.ANTHROPIC_API_KEY, env.OPENAI_API_KEY]) {
+    if (key?.trim()) core.setSecret(key.trim());
+  }
+  return env;
+}
+
+/**
+ * Resolve the model input to the provider that serves it, with the same rules as AutoTriage.
+ * A workflow_dispatch input with a Gemini default keeps passing that model after a workflow switches keys, so the missing-key error also says how to fix the input.
+ */
+function resolveConfiguredModel(): ResolvedModel {
+  try {
+    return resolveModel({ input: 'model', value: core.getInput('model'), env: readModelEnv(), defaults: DEFAULT_MODELS });
+  } catch (err) {
+    if (err instanceof ModelResolutionError && MISSING_KEY_ERROR.test(err.message)) {
+      throw new ModelResolutionError(`${err.message} If the model comes from a workflow_dispatch input, change that input's default to "" and set required: false, so the default for the key you set is used.`);
+    }
+    throw err;
+  }
+}
+
+/**
  * Resolve runtime config.
- * Throws early with actionable messages if mandatory secrets (GITHUB_TOKEN, GEMINI_API_KEY) are missing or repo context is absent.
+ * Throws early with actionable messages if GITHUB_TOKEN is missing, the model input can't be resolved to a provider with its key, or repo context is absent.
  */
 export function getConfig(): Config {
   const token = process.env.GITHUB_TOKEN || '';
-  const geminiApiKey = process.env.GEMINI_API_KEY || '';
 
   if (!token) throw new Error('GITHUB_TOKEN missing (add: secrets.GITHUB_TOKEN).');
-  if (!geminiApiKey) throw new Error('GEMINI_API_KEY missing (add it as a repository secret).');
+  const resolvedModel = resolveConfiguredModel();
 
   const baseCommit = requireInput('base-commit');
   const headCommit = requireInput('head-commit');
@@ -77,7 +121,6 @@ export function getConfig(): Config {
   // Only consult the workflow's repository when the branch input doesn't name one, so owner/repo@branch works without repository context.
   const { owner, repo } = repository ?? resolveWorkflowRepository();
   const promptUrl = core.getInput('prompt-url');
-  const model = core.getInput('model') || 'gemini-flash-latest';
   const maxLinkedItems = Math.max(0, Math.floor(parseNumber(core.getInput('max-linked-items') || '5', 5)));
   const maxReferenceDepth = Math.max(0, Math.floor(parseNumber(core.getInput('max-reference-depth') || '2', 2)));
   const maxItemLength = Math.max(0, Math.floor(parseNumber(core.getInput('max-item-length') || '5000', 5000)));
@@ -89,9 +132,9 @@ export function getConfig(): Config {
     baseCommit,
     headCommit,
     token,
-    geminiApiKey,
     promptUrl,
-    model,
+    model: resolvedModel.model,
+    resolvedModel,
     maxLinkedItems,
     maxReferenceDepth,
     maxItemLength,
