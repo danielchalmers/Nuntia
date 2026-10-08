@@ -133,6 +133,16 @@ describe('GeminiClient.generateText', () => {
     expect(generateContent).toHaveBeenCalledTimes(1);
   });
 
+  it('fails fast instead of returning notes cut off at the output token limit', async () => {
+    const generateContent = vi.fn().mockResolvedValue({
+      candidates: [{ finishReason: 'MAX_TOKENS', content: { parts: [{ text: '## Notes\n- Fixed th' }] } }],
+    });
+    const client = makeClient(generateContent);
+
+    await expect(client.generateText(PAYLOAD, 2, 1)).rejects.toThrow(/output token limit \(MAX_TOKENS\).*not written/s);
+    expect(generateContent).toHaveBeenCalledTimes(1);
+  });
+
   it('ignores an unspecified block reason and joins the text parts', async () => {
     const generateContent = vi.fn().mockResolvedValue({
       promptFeedback: { blockReason: 'BLOCKED_REASON_UNSPECIFIED' },
@@ -143,6 +153,17 @@ describe('GeminiClient.generateText', () => {
     const result = await client.generateText(PAYLOAD, 2, 1);
 
     expect(result).toEqual({ text: '## Notes\n- Fixed it', inputTokens: 0, outputTokens: 0 });
+  });
+
+  it('leaves thought parts out of the text', async () => {
+    const generateContent = vi.fn().mockResolvedValue({
+      candidates: [{ finishReason: 'STOP', content: { parts: [{ text: 'Planning the highlights first.', thought: true }, { text: '## Notes\n- Fixed it' }] } }],
+    });
+    const client = makeClient(generateContent);
+
+    const result = await client.generateText(PAYLOAD, 2, 1);
+
+    expect(result.text).toBe('## Notes\n- Fixed it');
   });
 
   it('retries an empty response because it can be transient', async () => {
