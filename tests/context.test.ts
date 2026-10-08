@@ -19,14 +19,13 @@ const BASE_CONFIG: Config = {
   token: 'token',
   promptUrl: 'https://example.com/prompt.txt',
   model: 'gemini-3.5-flash-lite',
-  resolvedModel: {
+  endpoint: {
     provider: 'gemini',
     model: 'gemini-3.5-flash-lite',
-    tier: 'official',
-    baseUrl: 'https://generativelanguage.googleapis.com',
+    baseUrl: 'https://generativelanguage.googleapis.com/v1beta/openai',
     host: 'generativelanguage.googleapis.com',
     apiKey: 'gemini-key',
-    reason: 'set by model',
+    keyName: 'GEMINI_API_KEY',
     isDefault: false,
   },
   maxLinkedItems: 3,

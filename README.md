@@ -10,7 +10,7 @@ The default prompt produces a themed changelog rather than a per-commit log: a h
 
 ## Quick start
 
-1. Add a `GEMINI_API_KEY` secret to your repository or organization ([get a key](https://aistudio.google.com/apikey)). To use Claude or OpenAI instead, add `ANTHROPIC_API_KEY` or `OPENAI_API_KEY` and map it in the step's `env` in place of `GEMINI_API_KEY` (see [Models](#models)).
+1. Add a model API key as a secret in your repository or organization: `GEMINI_API_KEY` ([get a key](https://aistudio.google.com/apikey)), `ANTHROPIC_API_KEY` or `OPENAI_API_KEY`. Map it in the step's `env` (see [Models](#models)).
 2. Add a manually-triggered workflow, like the ready-to-use [`examples/workflows/nuntia.yml`](./examples/workflows/nuntia.yml):
 
 ```yaml
@@ -64,9 +64,9 @@ jobs:
 
 ## Models
 
-Nuntia picks the provider from the API key you set, with the same rules as [AutoTriage](https://github.com/danielchalmers/AutoTriage#models), so one set of secrets works for both actions. `model` is only needed to pick a model other than that key's default.
+Set one model API key as a secret and map it in the step's `env`. Nuntia talks to every provider through its OpenAI-compatible Chat Completions API, with the same rules as [AutoTriage](https://github.com/danielchalmers/AutoTriage#models), so one set of secrets works for both actions.
 
-| API key | Default when `model` is blank |
+| API key | Default model |
 | --- | --- |
 | `GEMINI_API_KEY` | `gemini-flash-latest` |
 | `ANTHROPIC_API_KEY` | `claude-sonnet-5-5` |
@@ -75,12 +75,13 @@ Nuntia picks the provider from the API key you set, with the same rules as [Auto
 
 These defaults favor quality over cost, because the notes come from one call per release and a person reviews them.
 
-- **Any OpenAI-compatible service** (OpenRouter, Azure OpenAI, Groq, Mistral, xAI, DeepSeek, Together, Fireworks, Cerebras, LiteLLM, vLLM, Ollama, ...) works by setting `OPENAI_BASE_URL` to its API base and `model` to a model it serves, such as `anthropic/claude-sonnet-5.5` on OpenRouter. AutoTriage's [Models](https://github.com/danielchalmers/AutoTriage#models) section has the details, including the support tiers.
+- **With one key set**, `model` goes to it. With several, a `gemini-*` or `claude-*` model goes to Gemini or Claude when that key is set, and any other model goes to OpenAI or `OPENAI_BASE_URL`.
+- **Any OpenAI-compatible service** (OpenRouter, Azure OpenAI, Groq, Mistral, xAI, DeepSeek, Together, Fireworks, Cerebras, LiteLLM, vLLM, Ollama, ...) works by setting `OPENAI_BASE_URL` to its API base and `model` to a model it serves, such as `anthropic/claude-sonnet-5.5` on OpenRouter.
 - **A `model` input passed through from `workflow_dispatch`** keeps sending its default after you switch keys. Change that input's default to `""` and set `required: false`, as in [the example workflow](./examples/workflows/nuntia.yml), so the default for the key you set is used.
-- **The log states the choice**, such as `Model: claude-sonnet-5-5 via anthropic [official] — default for ANTHROPIC_API_KEY`.
-- **Each provider runs at its default reasoning level**, and only the answer text is kept, so the model's thoughts never end up in the notes.
-- **Failures.** A bad key, an unknown model, or a billing problem fails at once and names the secret or input to fix. An overloaded or rate-limited provider is retried for a few minutes. Notes cut off at the output limit, or a refusal, fail the run without writing a notes file.
-- **Your data.** Commit messages and linked issue and pull request text go to the provider you pick. OpenAI-compatible calls send `store: false`. Gateways such as OpenRouter forward the text to further providers.
+- **The log names the model and host**, such as `Model: claude-sonnet-5-5 at api.anthropic.com (default for ANTHROPIC_API_KEY)`.
+- **Each provider runs at its default reasoning level.** Reasoning that a provider returns separately, or in a `<think>` block at the start of the reply, is left out of the notes.
+- **Failures.** A bad key, an unknown model, or a billing problem fails at once and says what to check. An overloaded or rate-limited provider is retried for a few minutes. Notes cut off at the output limit, or a refusal, fail the run without writing a notes file.
+- **Your data.** Commit messages and linked issue and pull request text go to the provider you pick. Gateways such as OpenRouter forward the text to further providers.
 
 ## Inputs
 
@@ -90,7 +91,7 @@ These defaults favor quality over cost, because the notes come from one call per
 | `head-commit` | End commit SHA (inclusive). | Required |
 | `branch` | Branch name (`branch` or `owner/repo@branch`). | Required |
 | `prompt-url` | URL to raw prompt template content. | [example prompt](./examples/Nuntia.prompt) |
-| `model` | Model that writes the notes, optionally with a `gemini/`, `anthropic/` or `openai/` prefix. | The default for the API key you set (see [Models](#models)) |
+| `model` | Model that writes the notes. | The default for the API key you set (see [Models](#models)) |
 | `max-linked-items` | Maximum linked issues/PRs/commits to fetch. | `5` |
 | `max-reference-depth` | Depth to follow references inside linked descriptions. | `2` |
 | `max-item-length` | Maximum length for each commit message and linked item title/body field. | `5000` |

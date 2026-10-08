@@ -1,4 +1,4 @@
-import type { ResolvedModel } from './llm/resolve';
+import type { Endpoint } from './llm/endpoint';
 
 export type Config = {
   owner: string;
@@ -8,10 +8,8 @@ export type Config = {
   headCommit: string;
   token: string;
   promptUrl: string;
-  // The model ID sent to the provider, as resolvedModel has it.
   model: string;
-  // The provider, key and support tier the model input resolved to.
-  resolvedModel: ResolvedModel;
+  endpoint: Endpoint;
   maxLinkedItems: number;
   maxReferenceDepth: number;
   maxItemLength: number;
