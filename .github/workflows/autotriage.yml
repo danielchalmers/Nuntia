@@ -17,11 +17,9 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      # AutoTriage@v4 predates Claude support, so this follows main until the next major version is tagged.
-      - uses: danielchalmers/AutoTriage@main
+      - uses: danielchalmers/AutoTriage@v4
         with:
           issues: ${{ github.event.pull_request.number || github.event.issue.number }}
-          model-pro: claude-opus-5-5
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
