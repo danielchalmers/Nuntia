@@ -95,9 +95,11 @@ export function generateTextBody(request: TextRequest) {
  * A blocked prompt or a refusal finish throws a refusal, and a MAX_TOKENS finish throws as truncated, before any text is read.
  */
 function readReply(response: unknown): { text: string; thoughts: string; usage: ModelUsage } {
-  const { blockReason } = asRecord(asRecord(response).promptFeedback);
-  if (typeof blockReason === 'string' && blockReason) {
-    throw new GeminiResponseError(`Gemini blocked the prompt (blockReason ${blockReason})`, { kind: 'refusal' });
+  const { blockReason, blockReasonMessage } = asRecord(asRecord(response).promptFeedback);
+  // BLOCKED_REASON_UNSPECIFIED is the enum's default value, not a block.
+  if (typeof blockReason === 'string' && blockReason && blockReason !== 'BLOCKED_REASON_UNSPECIFIED') {
+    const detail = typeof blockReasonMessage === 'string' && blockReasonMessage ? `: ${blockReasonMessage}` : '';
+    throw new GeminiResponseError(`Gemini blocked the prompt (blockReason ${blockReason})${detail}`, { kind: 'refusal' });
   }
 
   const candidates = asRecord(response).candidates;

@@ -10,7 +10,7 @@ const HEADER = '// Source: AutoTriage (danielchalmers/AutoTriage, src/llm/). Nun
 const TESTS_HEADER = '// Source: AutoTriage (danielchalmers/AutoTriage, tests/llm/). Nuntia copies this folder verbatim, so change it in AutoTriage and copy it over in a paired PR.';
 
 // The PINNED_HASH in AutoTriage's tests/llmShared.test.ts for the copied commit. Update it only when copying the folder over again.
-const PINNED_HASH = 'sha256:1ceb217e56f7381b389273a86f12229af456efb24d924ef38aef56fbb1ae3393';
+const PINNED_HASH = 'sha256:b1cdf5b4ee688b2060bd0781bec448304ea1cb41e00c2e88be0379b8abb7639e';
 
 function llmFiles(dir: string): Array<{ name: string; text: string }> {
   return fs.readdirSync(dir)

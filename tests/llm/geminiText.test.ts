@@ -51,6 +51,17 @@ describe('Gemini text calls', () => {
     })
   })
 
+  it('ignores an unspecified block reason, and names a real one with its message', async () => {
+    const unspecified = { promptFeedback: { blockReason: 'BLOCKED_REASON_UNSPECIFIED' }, candidates: [{ finishReason: 'STOP', content: { parts: [{ text: 'Notes' }] } }] }
+    expect((await new GeminiClient('test-key', respond(unspecified)).generateText(REQUEST, 0, 1)).text).toBe('Notes')
+
+    const blocked = { promptFeedback: { blockReason: 'PROHIBITED_CONTENT', blockReasonMessage: 'The prompt was blocked.' } }
+    const err = await new GeminiClient('test-key', respond(blocked)).generateText(REQUEST, 0, 1).catch((error: unknown) => error)
+    expect(err).toBeInstanceOf(ModelError)
+    expect((err as ModelError).message).toBe('Gemini blocked the prompt (blockReason PROHIBITED_CONTENT): The prompt was blocked.')
+    expect((err as ModelError).failure.kind).toBe('refusal')
+  })
+
   it('fails on a blank answer, a refusal, or a truncated answer', async () => {
     const failureOf = async (reply: unknown) => {
       const err = await new GeminiClient('test-key', respond(reply)).generateText(REQUEST, 0, 1).catch((error: unknown) => error)

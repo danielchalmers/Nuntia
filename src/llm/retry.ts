@@ -27,7 +27,7 @@ export function failureOf(err: unknown): Failure {
  * Run one model call until it succeeds, its retry budget runs out, or it fails in a way no retry can fix.
  * `maxRetries`/`initialBackoffMs` govern retryable failures (parse errors, rejected replies, network errors, 5xx other than capacity).
  * Capacity errors switch to the longer TRANSIENT_* schedule instead, waiting at least as long as a whole-second Retry-After asks, up to TRANSIENT_MAX_BACKOFF_MS.
- * Each capacity retry is logged so the run output shows the outage being waited out.
+ * Each retry is logged, so the run output shows an outage being waited out or a flaky reply being retried.
  * Permanent, truncated, refused, and fatal failures are thrown at once.
  * Either way the call throws a ModelError with the last failure's message and kind.
  */
@@ -63,6 +63,7 @@ export async function withRetries<T>(
       ordinaryFailures++;
       if (ordinaryFailures >= maxOrdinaryFailures) break;
       backoff = Math.max(1, initialBackoffMs * Math.pow(2, ordinaryFailures - 1));
+      console.warn(`Model call failed (attempt ${ordinaryFailures}/${maxOrdinaryFailures}); retrying in ${Math.round(backoff / 1000)}s: ${errorMessage(lastError)}`);
     } else {
       break;
     }
