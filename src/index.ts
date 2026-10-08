@@ -20,6 +20,10 @@ async function run(): Promise<void> {
   const { systemPrompt, userPrompt } = buildPrompt(context, promptText);
   const payload = buildTextPayload(systemPrompt, userPrompt, cfg.model);
 
+  // Write the debug artifacts before calling Gemini so a failed generation still leaves them for the workflow to upload.
+  writeTextFile('artifacts/nuntia-payload.json', JSON.stringify(payload, null, 2));
+  writeTextFile('artifacts/nuntia-context.json', JSON.stringify(context, null, 2));
+
   console.log(`Generating release notes...`);
   const { text, inputTokens, outputTokens } = await gemini.generateText(payload, 2, 5000);
   console.log(`Used ${inputTokens} input tokens, ${outputTokens} output tokens.`);
@@ -28,8 +32,6 @@ async function run(): Promise<void> {
   const outputText = `${text.trimEnd()}\n\n${attribution}\n`;
 
   const outputPath = writeTextFile('artifacts/nuntia-release-notes.md', outputText);
-  writeTextFile('artifacts/nuntia-payload.json', JSON.stringify(payload, null, 2));
-  writeTextFile('artifacts/nuntia-context.json', JSON.stringify(context, null, 2));
   console.log('Wrote release notes and debug artifacts to the artifacts/ directory. Upload them from your workflow (e.g. actions/upload-artifact with path: artifacts).');
 
   // Surface the notes in the workflow run summary so they render in the Actions UI without downloading the artifact.

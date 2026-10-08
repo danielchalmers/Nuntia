@@ -166,4 +166,21 @@ describe('Nuntia action entry point', () => {
     expect(mocks.setOutput).not.toHaveBeenCalled();
     expect(fs.existsSync(path.join(tempDir, 'artifacts'))).toBe(false);
   });
+
+  it('keeps the debug artifacts but writes no notes, summary, or outputs when generation fails', async () => {
+    vi.stubEnv('GITHUB_STEP_SUMMARY', path.join(tempDir, 'summary.md'));
+    mocks.generateText.mockRejectedValue(new Error('Gemini stopped at the output token limit (MAX_TOKENS)'));
+
+    await runAction();
+
+    const artifacts = path.join(tempDir, 'artifacts');
+    expect(mocks.setFailed).toHaveBeenCalledWith('Gemini stopped at the output token limit (MAX_TOKENS)');
+    expect(mocks.setOutput).not.toHaveBeenCalled();
+    expect(mocks.summary.write).not.toHaveBeenCalled();
+    expect(fs.existsSync(path.join(artifacts, 'nuntia-release-notes.md'))).toBe(false);
+    expect(JSON.parse(fs.readFileSync(path.join(artifacts, 'nuntia-context.json'), 'utf8'))).toEqual(CONTEXT);
+    expect(JSON.parse(fs.readFileSync(path.join(artifacts, 'nuntia-payload.json'), 'utf8'))).toMatchObject({
+      model: 'gemini-flash-latest',
+    });
+  });
 });

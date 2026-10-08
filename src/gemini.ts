@@ -116,10 +116,18 @@ export class GeminiClient {
       );
     }
 
+    // A response cut off at the output limit would publish notes that end mid-sentence, so fail instead of returning them.
+    if (candidate?.finishReason === FinishReason.MAX_TOKENS) {
+      throw new GeminiResponseError(
+        `Gemini stopped at the model's output token limit (${FinishReason.MAX_TOKENS}), so the release notes would be incomplete and were not written. A response that long would likely hit the limit again, so it is not retried. Narrow the commit range, use a prompt that asks for shorter notes, or choose a model with a larger output limit.`
+      );
+    }
+
     const textParts: string[] = [];
 
     for (const p of candidate?.content?.parts ?? []) {
-      if (typeof p.text === 'string') {
+      // Thought parts are the model's reasoning, not release notes.
+      if (typeof p.text === 'string' && !p.thought) {
         textParts.push(p.text);
       }
     }
