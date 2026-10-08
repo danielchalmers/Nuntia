@@ -1,5 +1,5 @@
 import { ApiError, BlockedReason, FinishReason, GenerateContentResponse, GoogleGenAI, type Fetch, type GenerateContentParameters } from '@google/genai';
-import { Agent, fetch, type Dispatcher, type RequestInit as UndiciRequestInit } from 'undici';
+import { Agent, EnvHttpProxyAgent, fetch, type Dispatcher, type RequestInit as UndiciRequestInit } from 'undici';
 
 // Deadline for each Gemini attempt. Large releases on slower models can take minutes before Gemini sends any response headers.
 const REQUEST_TIMEOUT_MS = 600_000;
@@ -104,6 +104,11 @@ function classifyError(err: unknown, model: string): { retryable: boolean; messa
   };
 }
 
+function defaultDispatcher(): Dispatcher {
+  const options = { headersTimeout: 0, bodyTimeout: 0 };
+  return process.env.NODE_USE_ENV_PROXY === '1' ? new EnvHttpProxyAgent(options) : new Agent(options);
+}
+
 export class GeminiClient {
   private client: GoogleGenAI;
 
@@ -111,8 +116,9 @@ export class GeminiClient {
    * Node's built-in fetch gives up when response headers, or a gap between body chunks, take longer than five minutes, whatever timeout the caller sets.
    * Gemini requests therefore go through undici's own fetch with those limits turned off, which leaves REQUEST_TIMEOUT_MS as the only deadline.
    * The dispatcher is set per request, so GitHub traffic is unchanged.
+   * Node's built-in fetch only honors HTTP(S)_PROXY and NO_PROXY when NODE_USE_ENV_PROXY=1, so Gemini traffic keeps that behavior.
    */
-  constructor(apiKey: string, dispatcher: Dispatcher = new Agent({ headersTimeout: 0, bodyTimeout: 0 })) {
+  constructor(apiKey: string, dispatcher: Dispatcher = defaultDispatcher()) {
     // Typed against undici's own fetch, whose types differ from the global fetch types in @types/node. genai only ever passes a URL string, so the cast is safe.
     const geminiFetch = (input: string | URL, init?: UndiciRequestInit) => fetch(input, { ...init, dispatcher });
     this.client = new GoogleGenAI({

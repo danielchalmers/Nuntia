@@ -259,4 +259,28 @@ describe('GeminiClient over HTTP', () => {
     expect(result).toEqual({ text: 'notes', inputTokens: 10, outputTokens: 20 });
     expect(lastHeaders?.['x-server-timeout']).toBe('600');
   });
+
+  // Node's built-in fetch only honors proxy variables with NODE_USE_ENV_PROXY=1, and Gemini traffic must keep doing the same.
+  it('uses the proxy from the environment when NODE_USE_ENV_PROXY=1', async () => {
+    const tunnels: string[] = [];
+    const proxy = createServer();
+    proxy.on('connect', (req, socket) => {
+      tunnels.push(req.url ?? '');
+      socket.end('HTTP/1.1 403 Forbidden\r\n\r\n');
+    });
+    await new Promise<void>(resolve => proxy.listen(0, '127.0.0.1', resolve));
+
+    try {
+      vi.stubEnv('http_proxy', `http://127.0.0.1:${(proxy.address() as AddressInfo).port}`);
+      vi.stubEnv('no_proxy', '');
+      vi.stubEnv('NODE_USE_ENV_PROXY', '1');
+      const client = new GeminiClient('test-key');
+
+      await expect(client.generateText(localPayload(), 0, 1)).rejects.toThrow('fetch failed');
+      expect(tunnels).toEqual([new URL(baseUrl).host]);
+    } finally {
+      vi.unstubAllEnvs();
+      proxy.close();
+    }
+  });
 });
