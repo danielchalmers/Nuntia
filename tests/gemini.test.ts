@@ -212,7 +212,8 @@ describe('GeminiClient.generateText', () => {
 
 // Real requests to a local stand-in for Gemini that is slow to send response headers, as a busy model is.
 describe('GeminiClient over HTTP', () => {
-  const HEADERS_DELAY_MS = 1000;
+  // undici checks header timeouts on a coarse timer that can fire about a second late, so the server waits well past a short timeout.
+  const HEADERS_DELAY_MS = 2500;
   let lastHeaders: IncomingHttpHeaders | undefined;
   let baseUrl = '';
   const server = createServer((req, res) => {
