@@ -1,5 +1,8 @@
-import { describe, it, expect, vi } from 'vitest';
+import { createServer, type IncomingHttpHeaders } from 'node:http';
+import type { AddressInfo } from 'node:net';
+import { afterAll, beforeAll, describe, it, expect, vi } from 'vitest';
 import { ApiError } from '@google/genai';
+import { Agent } from 'undici';
 import { buildTextPayload, GeminiClient, GeminiResponseError } from '../src/gemini';
 
 const PAYLOAD = buildTextPayload('system', 'user', 'gemini-flash-latest');
@@ -99,6 +102,13 @@ describe('GeminiClient.generateText', () => {
     expect(generateContent).toHaveBeenCalledTimes(2);
   });
 
+  it('names the cause that fetch hides behind "fetch failed"', async () => {
+    const cause = Object.assign(new Error('Headers Timeout Error'), { code: 'UND_ERR_HEADERS_TIMEOUT' });
+    const client = makeClient(vi.fn().mockRejectedValue(Object.assign(new TypeError('fetch failed'), { cause })));
+
+    await expect(client.generateText(PAYLOAD, 0, 1)).rejects.toThrow('fetch failed (UND_ERR_HEADERS_TIMEOUT) (1 attempts)');
+  });
+
   // Errors that can never succeed on a retry: one attempt, and the message must point at the input to fix.
   it.each([
     ['404, naming the model input', { message: 'models/gemini-flash-latets is not found', status: 404 }, /model "gemini-flash-latest".*"model" input/s],
@@ -185,5 +195,54 @@ describe('GeminiClient.generateText', () => {
 
     const exhausted = makeClient(vi.fn().mockRejectedValue(new ApiError({ message: 'Unavailable', status: 503 })));
     await expect(exhausted.generateText(PAYLOAD, 0, 1)).rejects.toBeInstanceOf(GeminiResponseError);
+  });
+});
+
+// Real requests to a local stand-in for Gemini that is slow to send response headers, as a busy model is.
+describe('GeminiClient over HTTP', () => {
+  const HEADERS_DELAY_MS = 1000;
+  let lastHeaders: IncomingHttpHeaders | undefined;
+  let baseUrl = '';
+  const server = createServer((req, res) => {
+    lastHeaders = req.headers;
+    req.resume();
+    setTimeout(() => {
+      if (res.destroyed) return;
+      res.writeHead(200, { 'Content-Type': 'application/json' }).end(JSON.stringify(makeTextResponse('notes')));
+    }, HEADERS_DELAY_MS);
+  });
+
+  beforeAll(async () => {
+    await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
+    baseUrl = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+  });
+
+  afterAll(async () => {
+    server.closeAllConnections();
+    await new Promise(resolve => server.close(resolve));
+  });
+
+  function localPayload() {
+    return { ...PAYLOAD, config: { ...PAYLOAD.config, httpOptions: { baseUrl } } };
+  }
+
+  it('sends requests through its own dispatcher, so that dispatcher decides how long to wait for headers', async () => {
+    const dispatcher = new Agent({ headersTimeout: 100 });
+    const client = new GeminiClient('test-key', dispatcher);
+
+    try {
+      await expect(client.generateText(localPayload(), 0, 1)).rejects.toThrow('fetch failed (UND_ERR_HEADERS_TIMEOUT) (1 attempts)');
+    } finally {
+      await dispatcher.close();
+    }
+  });
+
+  it('waits for slow headers by default and tells Gemini about its 10-minute deadline', async () => {
+    const client = new GeminiClient('test-key');
+
+    const result = await client.generateText(localPayload(), 0, 1);
+
+    expect(result).toEqual({ text: 'notes', inputTokens: 10, outputTokens: 20 });
+    expect(lastHeaders?.['x-server-timeout']).toBe('600');
   });
 });

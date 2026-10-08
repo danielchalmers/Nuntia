@@ -1,4 +1,8 @@
-import { ApiError, BlockedReason, FinishReason, GenerateContentResponse, GoogleGenAI, type GenerateContentParameters } from '@google/genai';
+import { ApiError, BlockedReason, FinishReason, GenerateContentResponse, GoogleGenAI, type Fetch, type GenerateContentParameters } from '@google/genai';
+import { Agent, fetch, type Dispatcher, type RequestInit as UndiciRequestInit } from 'undici';
+
+// Deadline for each Gemini attempt. Large releases on slower models can take minutes before Gemini sends any response headers.
+const REQUEST_TIMEOUT_MS = 600_000;
 
 export function buildTextPayload(
   systemPrompt: string,
@@ -46,6 +50,12 @@ function httpStatusOf(err: unknown): number | undefined {
   return typeof status === 'number' ? status : undefined;
 }
 
+// fetch reports every network failure as "fetch failed" and keeps the real reason (e.g. UND_ERR_HEADERS_TIMEOUT) on its cause.
+function causeCodeOf(err: unknown): string | undefined {
+  const code = (err as { cause?: { code?: unknown } } | null)?.cause?.code;
+  return typeof code === 'string' ? code : undefined;
+}
+
 /**
  * Decide whether an error is worth retrying, and build the message shown when it is not (or when retries run out).
  * Quota, server, and network problems are transient.
@@ -61,7 +71,8 @@ function classifyError(err: unknown, model: string): { retryable: boolean; messa
 
   // No HTTP status means the request never got an answer (DNS failure, reset connection, timeout).
   if (status === undefined) {
-    return { retryable: true, message: detail };
+    const code = causeCodeOf(err);
+    return { retryable: true, message: code ? `${detail} (${code})` : detail };
   }
 
   if (status === 429 || status === 408 || status >= 500) {
@@ -92,8 +103,18 @@ function classifyError(err: unknown, model: string): { retryable: boolean; messa
 export class GeminiClient {
   private client: GoogleGenAI;
 
-  constructor(apiKey: string) {
-    this.client = new GoogleGenAI({ apiKey });
+  /**
+   * Node's built-in fetch gives up when response headers, or a gap between body chunks, take longer than five minutes, whatever timeout the caller sets.
+   * Gemini requests therefore go through undici's own fetch with those limits turned off, which leaves REQUEST_TIMEOUT_MS as the only deadline.
+   * The dispatcher is set per request, so GitHub traffic is unchanged.
+   */
+  constructor(apiKey: string, dispatcher: Dispatcher = new Agent({ headersTimeout: 0, bodyTimeout: 0 })) {
+    // Typed against undici's own fetch, whose types differ from the global fetch types in @types/node. genai only ever passes a URL string, so the cast is safe.
+    const geminiFetch = (input: string | URL, init?: UndiciRequestInit) => fetch(input, { ...init, dispatcher });
+    this.client = new GoogleGenAI({
+      apiKey,
+      httpOptions: { timeout: REQUEST_TIMEOUT_MS, fetch: geminiFetch as unknown as Fetch },
+    });
   }
 
   private sleep(ms: number) {
