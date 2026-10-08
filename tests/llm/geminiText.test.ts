@@ -1,4 +1,3 @@
-// Source: AutoTriage (danielchalmers/AutoTriage, tests/llm/). Nuntia copies this folder verbatim, so change it in AutoTriage and copy it over in a paired PR.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { GeminiClient } from '../../src/llm/gemini'
 import type { Fetch } from '../../src/llm/transport'

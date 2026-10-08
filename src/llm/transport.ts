@@ -1,19 +1,15 @@
-// Source: AutoTriage (danielchalmers/AutoTriage, src/llm/). Nuntia copies this folder verbatim, so change it in AutoTriage and copy it over in a paired PR.
 import { Agent, EnvHttpProxyAgent, fetch as undiciFetch } from 'undici';
 import { ModelApiError, ModelError } from './types';
 
 export type Fetch = typeof globalThis.fetch;
 
-// Deadline for every model request, so a stuck call fails instead of hanging the run.
-// Flex calls can take minutes to start answering, so it is generous.
+// Flex calls can take minutes to start answering, so the deadline is generous.
 export const MODEL_TIMEOUT_MS = 600_000;
 
 /**
- * Fetch for model requests, using undici's own fetch with a dedicated dispatcher.
- * Node's built-in fetch gives up on any response whose headers take longer than 300s, and a longer AbortSignal cannot lift that.
- * The dispatcher's own timers are off by default so MODEL_TIMEOUT_MS is the only deadline; tests pass a short timeout to prove requests go through it.
- * It is passed with each request rather than installed as Node's global dispatcher, so GitHub API traffic is unchanged.
- * Node's built-in fetch only honors HTTP(S)_PROXY and NO_PROXY when NODE_USE_ENV_PROXY=1, so model traffic keeps that behavior.
+ * undici's own fetch, because Node's built-in fetch gives up on any response whose headers take longer than 300s, whatever the AbortSignal.
+ * The dispatcher's timers are off by default so MODEL_TIMEOUT_MS is the only deadline, and it is passed per request so GitHub API traffic is unchanged.
+ * EnvHttpProxyAgent keeps the built-in fetch's proxy support under NODE_USE_ENV_PROXY=1.
  */
 export function createModelFetch(dispatcherTimeoutMs = 0): Fetch {
   const options = { headersTimeout: dispatcherTimeoutMs, bodyTimeout: dispatcherTimeoutMs };
@@ -31,15 +27,9 @@ export interface ModelRequestInit {
   redirect?: 'manual';
 }
 
-/**
- * Send one model request and return its JSON body.
- * The deadline covers reading the body too, and a request still running when it passes is aborted with an AbortError.
- * Network failures propagate as fetch reports them, and a non-2xx response throws as described in responseError.
- */
 export async function requestJson(fetch: Fetch, url: string, init: ModelRequestInit, timeoutMs = MODEL_TIMEOUT_MS): Promise<unknown> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
-  // The deadline alone must not keep the process alive.
   timer.unref();
   try {
     const response = await fetch(url, { ...init, signal: controller.signal });
@@ -50,12 +40,7 @@ export async function requestJson(fetch: Fetch, url: string, init: ModelRequestI
   }
 }
 
-/**
- * The error for a non-2xx response, with the same message @google/genai gave it so log lines and failure strings don't change.
- * The message is the JSON error body, or the text body wrapped in the same `{"error": ...}` shape when the response isn't JSON.
- * A 4xx or 5xx gives a ModelApiError carrying the status, its failure kind, and a whole-second Retry-After; anything else gives a plain Error.
- * A redirect only reaches here when the request refused to follow it, and it fails as permanent, because the same request would be redirected again.
- */
+// A text error body is wrapped in the same `{"error": ...}` shape as a JSON one.
 async function responseError(response: Response): Promise<Error> {
   if (response.status >= 300 && response.status < 400) {
     const location = response.headers.get('location');

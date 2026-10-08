@@ -1,22 +1,17 @@
-// Source: AutoTriage (danielchalmers/AutoTriage, src/llm/). Nuntia copies this folder verbatim, so change it in AutoTriage and copy it over in a paired PR.
 import { classifyApiError } from './errors';
 
-// Provider-neutral shapes shared by the model adapters and the code that calls them.
-
-/** One call for a JSON reply that follows a response schema. */
 export interface JsonRequest {
   model: string;
   systemPrompt: string;
   userPrompt: string;
-  // Written in the Gemini API's schema dialect by the caller; other adapters convert it with toJsonSchema.
+  // In the Gemini API's schema dialect; the other adapters convert it with toJsonSchema.
   schema: unknown;
-  // The context the system prompt is cached under, from createCache: a Gemini cache that already holds the prompt, or a marker that tells the Claude adapter to mark the prompt for caching.
+  // From createCache: a Gemini cache that holds the system prompt, or a marker that tells another adapter to mark the prompt for caching.
   cacheName?: string | undefined;
-  // Gemini's cheaper, slower flex tier, used alongside the cache on backlog runs.
+  // Gemini's cheaper, slower flex tier; the other adapters ignore it.
   useFlexTier?: boolean | undefined;
 }
 
-/** One call for a plain text reply, with no schema and the provider's default reasoning settings. */
 export interface TextRequest {
   model: string;
   systemPrompt: string;
@@ -24,7 +19,6 @@ export interface TextRequest {
 }
 
 /**
- * What a call cost, in the same terms for every provider.
  * `inputTokens` is the whole prompt, cached tokens included, and `outputTokens` leaves out the thinking counted in `thoughtsTokens`.
  * `cacheWriteTokens` is set only by providers that bill for writing the prompt cache during the call, such as Claude.
  */
@@ -41,7 +35,6 @@ export interface JsonResult<T> extends ModelUsage {
   thoughts: string;
 }
 
-// The answer text alone, with any thoughts or reasoning left out.
 export interface TextResult extends ModelUsage {
   text: string;
 }
@@ -67,7 +60,6 @@ export type Failure =
 export type FailureKind = Failure['kind'];
 export type FatalCause = 'auth' | 'model' | 'quota';
 
-/** A model call that failed for good, or a reply that could not be used. Its message stands on its own in a log line. */
 export class ModelError extends Error {
   readonly failure: Failure;
 
@@ -78,11 +70,7 @@ export class ModelError extends Error {
   }
 }
 
-/**
- * A non-2xx response from a model API. The message is the error body as JSON, as @google/genai's ApiError built it.
- * Its failure comes from classifyApiError unless the adapter knows better.
- * `retryAfterSeconds` is the response's Retry-After header when it is a whole number of seconds.
- */
+/** A non-2xx response from a model API, whose message is the error body as JSON. */
 export class ModelApiError extends ModelError {
   readonly status: number;
   readonly retryAfterSeconds: number | undefined;

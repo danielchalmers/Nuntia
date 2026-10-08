@@ -1,25 +1,19 @@
-// Source: AutoTriage (danielchalmers/AutoTriage, src/llm/). Nuntia copies this folder verbatim, so change it in AutoTriage and copy it over in a paired PR.
 import { withRetries } from './retry';
 import { relaxSchema, toJsonSchema } from './schema';
 import { createModelFetch, requestJson, type Fetch } from './transport';
 import { ModelApiError, ModelError, type CacheInfo, type Failure, type JsonRequest, type JsonResult, type ModelUsage, type TextRequest, type TextResult } from './types';
 
-// Claude Messages API adapter, one request per call and no streaming.
-// Calls take seconds, and max_tokens stays under the size Anthropic's own SDKs allow without streaming.
-
 export const ANTHROPIC_BASE_URL = 'https://api.anthropic.com';
 const API_VERSION = '2023-06-01';
 
-// Thinking counts toward this limit too, and it is still several times what triage replies have used.
+// Thinking counts toward this too, and it is still several times what triage replies have used.
+// It stays under the size Anthropic's SDKs allow without streaming.
 const MAX_TOKENS = 20_000;
 
-// HIGH reasoning, to match Gemini's thinking level. Haiku 5.5 and Opus 5.5 default to medium, so it is always sent.
+// Matches Gemini's HIGH thinking level. Haiku 5.5 and Opus 5.5 default to medium, so it is always sent.
 const EFFORT = 'high';
 
-/**
- * What createCache returns, since Claude has no cache resource to create.
- * A request that carries it marks the system prompt for caching, and the first call writes the cache.
- */
+// What createCache returns, since Claude has no cache resource to create; a request that carries it marks the system prompt for caching.
 export const PROMPT_CACHE_MARKER = 'cache_control';
 
 // Claude caches the prompt for 5 minutes by default, and gaps between pro-pass calls on a backlog run can be longer.
@@ -27,8 +21,7 @@ const CACHE_CONTROL = { type: 'ephemeral', ttl: '1h' };
 
 // Too many optional or union parameters, or too large a grammar, such as a long label enum.
 const SCHEMA_TOO_COMPLEX = /schema is too complex|too complex for compilation/i;
-// Models before Claude 5.5 support only the older thinking settings, and some of them have no effort setting either.
-// Which of the two the API rejects first is not documented, so either one means the model can't take the official request.
+// Models before Claude 5.5 reject adaptive thinking or the effort setting, in an undocumented order and wording.
 const NO_OFFICIAL_REQUEST = /adaptive thinking is not supported|does not support adaptive thinking|\beffort\b[^"]*\bnot (supported|permitted)\b|\bnot support[^"]*\beffort\b/i;
 
 export class AnthropicResponseError extends ModelError {
@@ -51,10 +44,8 @@ function system(text: string, cached: boolean) {
 }
 
 /**
- * The Messages request body for a JSON reply.
- * Thinking is adaptive with summarized text, because Claude 5.5 models omit the thinking text unless asked.
+ * Thinking is summarized because Claude 5.5 models omit the thinking text unless asked.
  * Sampling settings, a prefilled reply and forced tool use are never sent, because Claude 5.5 models reject them.
- * `relaxed` sends the schema without the long enums on array items.
  */
 export function jsonMessagesBody(request: JsonRequest, relaxed = false) {
   return {
@@ -70,7 +61,6 @@ export function jsonMessagesBody(request: JsonRequest, relaxed = false) {
   };
 }
 
-/** The Messages request body for a plain text reply, with each model's default thinking and effort. */
 export function textMessagesBody(request: TextRequest) {
   return {
     model: request.model,
@@ -80,12 +70,6 @@ export function textMessagesBody(request: TextRequest) {
   };
 }
 
-/**
- * Split a Messages response into the answer text and the model's thoughts, and read its token usage.
- * Thinking blocks are kept out of the answer text, so they never reach JSON.parse.
- * A refusal throws as one, with its category, and a reply cut off by the output or context limit throws as truncated, before any text is read.
- * Claude's input_tokens leaves out cached tokens and its output_tokens includes thinking, so both are rebased to the shared ModelUsage terms.
- */
 function readReply(response: unknown): { text: string; thoughts: string; usage: ModelUsage } {
   const message = asRecord(response);
   const stopReason = message.stop_reason;
@@ -117,6 +101,7 @@ function readReply(response: unknown): { text: string; thoughts: string; usage: 
     throw new AnthropicResponseError('Claude responded with empty text');
   }
 
+  // input_tokens leaves out cached tokens and output_tokens includes thinking, so both are rebased to the ModelUsage terms.
   const usage = asRecord(message.usage);
   const cacheReadTokens = tokenCount(usage.cache_read_input_tokens);
   const cacheWriteTokens = tokenCount(usage.cache_creation_input_tokens);
@@ -149,7 +134,6 @@ export class AnthropicClient {
   private readonly apiKey: string;
   private readonly fetch: Fetch;
   private readonly baseUrl: string;
-  // Set for the rest of the run once Claude rejects the full schema as too complex.
   private relaxedSchema = false;
 
   constructor(apiKey: string, fetch: Fetch = createModelFetch(), baseUrl = ANTHROPIC_BASE_URL) {
@@ -175,10 +159,6 @@ export class AnthropicClient {
     });
   }
 
-  /**
-   * Claude caches a marked prompt as part of an ordinary call, so there is nothing to create and no API call is made.
-   * The marker it returns makes later requests mark the system prompt, and the cache writes those calls report are their own usage.
-   */
   async createCache(_model: string, _systemPrompt: string, _displayName?: string): Promise<CacheInfo> {
     return { name: PROMPT_CACHE_MARKER, tokenCount: 0 };
   }
@@ -186,12 +166,6 @@ export class AnthropicClient {
   // The cache expires on its own an hour after its last use.
   async deleteCache(_name: string): Promise<void> {}
 
-  /**
-   * Call the model and parse its JSON reply, retrying as withRetries describes.
-   * `validate`, when given, narrows the parsed reply; a reply it rejects by throwing counts as an ordinary failure, like a parse error.
-   * A schema rejected as too complex is sent again at once without the long enums on array items, and stays that way for the rest of the run, with one warning.
-   * A model without adaptive thinking or the effort setting fails as an unusable model, since every call to it would be rejected the same way.
-   */
   generateJson<T = unknown>(
     request: JsonRequest,
     maxRetries: number,
@@ -224,10 +198,6 @@ export class AnthropicClient {
     }
   }
 
-  /**
-   * Call the model for a plain text reply, retrying as withRetries describes.
-   * The answer is trimmed, and its thinking is left out.
-   */
   generateText(request: TextRequest, maxRetries: number, initialBackoffMs: number): Promise<TextResult> {
     return withRetries(async () => {
       const reply = readReply(await this.request(textMessagesBody(request)));

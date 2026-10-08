@@ -1,4 +1,3 @@
-// Source: AutoTriage (danielchalmers/AutoTriage, tests/llm/). Nuntia copies this folder verbatim, so change it in AutoTriage and copy it over in a paired PR.
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { AnthropicClient, PROMPT_CACHE_MARKER } from '../../src/llm/anthropic'
 import { toJsonSchema } from '../../src/llm/schema'

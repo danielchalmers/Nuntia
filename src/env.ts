@@ -3,7 +3,7 @@ import * as github from '@actions/github';
 import { ModelResolutionError, resolveModel, type ModelEnv, type ProviderId, type ResolvedModel } from './llm/resolve';
 import type { Config } from './types';
 
-// The model each key gets when the model input is blank. GEMINI_API_KEY keeps the default Nuntia had before other providers were supported.
+// The model each key gets when the model input is blank.
 // They favor quality over cost, because release notes are one call per release and a person reviews them.
 const DEFAULT_MODELS: Record<ProviderId, string> = {
   gemini: 'gemini-flash-latest',
@@ -11,7 +11,6 @@ const DEFAULT_MODELS: Record<ProviderId, string> = {
   openai: 'gpt-6.1-sol',
 };
 
-// The shared resolution error for a model whose provider key is not set.
 const MISSING_KEY_ERROR = /which needs \w+_API_KEY, and it is not set/;
 
 function parseNumber(input: string, fallback: number): number {
@@ -72,10 +71,6 @@ function resolveWorkflowRepository(): Repository {
   return { owner: repository.owner, repo: repository.repo };
 }
 
-/**
- * The model API settings, read only from the variables resolution documents.
- * Keys are masked so a later log line can't print them.
- */
 function readModelEnv(): ModelEnv {
   const env: ModelEnv = {
     GEMINI_API_KEY: process.env.GEMINI_API_KEY,
@@ -90,10 +85,7 @@ function readModelEnv(): ModelEnv {
   return env;
 }
 
-/**
- * Resolve the model input to the provider that serves it, with the same rules as AutoTriage.
- * A workflow_dispatch input with a Gemini default keeps passing that model after a workflow switches keys, so the missing-key error also says how to fix the input.
- */
+// A workflow_dispatch input with a Gemini default keeps passing that model after a workflow switches keys, so the missing-key error also says how to fix the input.
 function resolveConfiguredModel(): ResolvedModel {
   try {
     return resolveModel({ input: 'model', value: core.getInput('model'), env: readModelEnv(), defaults: DEFAULT_MODELS });

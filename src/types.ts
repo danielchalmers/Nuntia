@@ -8,9 +8,7 @@ export type Config = {
   headCommit: string;
   token: string;
   promptUrl: string;
-  // The model ID sent to the provider, as resolvedModel has it.
   model: string;
-  // The provider, key and support tier the model input resolved to.
   resolvedModel: ResolvedModel;
   maxLinkedItems: number;
   maxReferenceDepth: number;

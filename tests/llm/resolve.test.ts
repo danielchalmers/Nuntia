@@ -1,8 +1,6 @@
-// Source: AutoTriage (danielchalmers/AutoTriage, tests/llm/). Nuntia copies this folder verbatim, so change it in AutoTriage and copy it over in a paired PR.
 import { describe, expect, it } from 'vitest'
 import { describeModel, ModelResolutionError, resolveModel, type ModelEnv, type ResolvedModel } from '../../src/llm/resolve'
 
-// Shared resolution vectors: Nuntia copies tests/llm/ with src/llm/, so both actions pick models by the same rules.
 // Each action passes its own defaults; these are AutoTriage's.
 const DEFAULTS = { gemini: 'gemini-3.5-flash-lite', anthropic: 'claude-haiku-5-5', openai: 'gpt-6-luna' }
 

@@ -5,18 +5,15 @@ import { describe, expect, it } from 'vitest';
 
 // src/llm/ and tests/llm/ are copied verbatim from AutoTriage, so they must stand alone and must not be edited here.
 const LLM_DIR = path.join(__dirname, '..', 'src', 'llm');
-const LLM_TESTS_DIR = path.join(__dirname, 'llm');
-const HEADER = '// Source: AutoTriage (danielchalmers/AutoTriage, src/llm/). Nuntia copies this folder verbatim, so change it in AutoTriage and copy it over in a paired PR.';
-const TESTS_HEADER = '// Source: AutoTriage (danielchalmers/AutoTriage, tests/llm/). Nuntia copies this folder verbatim, so change it in AutoTriage and copy it over in a paired PR.';
 
 // The PINNED_HASH in AutoTriage's tests/llmShared.test.ts for the copied commit. Update it only when copying the folder over again.
-const PINNED_HASH = 'sha256:8e50182406a83281830d72971adc29db1617e1818a69db50e510d2e9b6ae78a0';
+const PINNED_HASH = 'sha256:b3fa340608609285099fdb328d15596296974c601596e7d8bf0846cfa1572ddf';
 
 function llmFiles(dir: string): Array<{ name: string; text: string }> {
   return fs.readdirSync(dir)
     .filter(name => name.endsWith('.ts'))
     .sort()
-    // Line endings are normalized so a Windows checkout hashes the same as CI, as in AutoTriage.
+    // Line endings are normalized so a Windows checkout hashes the same as CI.
     .map(name => ({ name, text: fs.readFileSync(path.join(dir, name), 'utf8').replace(/\r\n/g, '\n') }));
 }
 
@@ -25,15 +22,6 @@ function importSpecifiers(text: string): string[] {
 }
 
 describe('src/llm', () => {
-  it('names AutoTriage as the source at the top of every file', () => {
-    for (const { name, text } of llmFiles(LLM_DIR)) {
-      expect(text.split('\n')[0], name).toBe(HEADER);
-    }
-    for (const { name, text } of llmFiles(LLM_TESTS_DIR)) {
-      expect(text.split('\n')[0], name).toBe(TESTS_HEADER);
-    }
-  });
-
   it('imports only its own files and undici', () => {
     for (const { name, text } of llmFiles(LLM_DIR)) {
       for (const specifier of importSpecifiers(text)) {

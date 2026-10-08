@@ -1,8 +1,3 @@
-// Source: AutoTriage (danielchalmers/AutoTriage, src/llm/). Nuntia copies this folder verbatim, so change it in AutoTriage and copy it over in a paired PR.
-
-// Response schemas for APIs that take standard JSON Schema.
-// Callers write one schema in the Gemini API's dialect (uppercase types), which the Gemini adapter sends as is and the others convert here.
-
 type SchemaNode = Record<string, unknown>;
 
 function isNode(value: unknown): value is SchemaNode {
@@ -12,7 +7,6 @@ function isNode(value: unknown): value is SchemaNode {
 /**
  * Convert a Gemini-dialect schema to the strict JSON Schema the Claude and OpenAI APIs take.
  * Types are lowercased, `nullable` becomes a type that also allows null, Gemini's `propertyOrdering` is dropped, and every object gets `additionalProperties: false`, which strict mode requires.
- * Key order, `required` order and `enum` order are kept, and the input is not changed.
  */
 export function toJsonSchema(schema: unknown): unknown {
   if (Array.isArray(schema)) return schema.map(toJsonSchema);
@@ -40,7 +34,6 @@ export function toJsonSchema(schema: unknown): unknown {
 /**
  * The same schema without the `enum` on the items of any array, for an API that rejects the full schema as too large or complex.
  * Long enums built from data, such as repository labels, sit on array items, while short fixed ones on single values (an operation's kind or state) stay.
- * Works on either dialect, and the input is not changed.
  */
 export function relaxSchema(schema: unknown): unknown {
   return withoutItemEnums(schema, false);

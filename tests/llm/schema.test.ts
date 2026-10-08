@@ -1,4 +1,3 @@
-// Source: AutoTriage (danielchalmers/AutoTriage, tests/llm/). Nuntia copies this folder verbatim, so change it in AutoTriage and copy it over in a paired PR.
 import { describe, expect, it } from 'vitest'
 import { relaxSchema, toJsonSchema } from '../../src/llm/schema'
 

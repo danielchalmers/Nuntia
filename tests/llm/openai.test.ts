@@ -1,4 +1,3 @@
-// Source: AutoTriage (danielchalmers/AutoTriage, tests/llm/). Nuntia copies this folder verbatim, so change it in AutoTriage and copy it over in a paired PR.
 import { afterEach, beforeEach, describe, expect, it, vi, type MockInstance } from 'vitest'
 import { OpenAIClient, PROMPT_CACHE_BREAKPOINT, responseFormatNote } from '../../src/llm/openai'
 import { toJsonSchema } from '../../src/llm/schema'

@@ -1,21 +1,12 @@
-// Source: AutoTriage (danielchalmers/AutoTriage, src/llm/). Nuntia copies this folder verbatim, so change it in AutoTriage and copy it over in a paired PR.
-
-// Model resolution: which provider serves a model input, with which key, at which support tier.
-// It is a pure function of the input and the environment the caller passes in, so both actions apply the same rules and the tests need no process state.
-
 export type ProviderId = 'gemini' | 'anthropic' | 'openai';
 
 /**
- * How well a route is supported.
  * `official` is the current model family on its provider's own API, which the request shape is tested against.
  * Anything else that is reachable, including every OPENAI_BASE_URL endpoint, is `best-effort`.
  */
 export type Tier = 'official' | 'best-effort';
 
-/**
- * The only variables resolution reads.
- * An empty string counts as absent, because that is what a workflow triggered from a fork gets for every secret.
- */
+// An empty string counts as absent, because that is what a workflow triggered from a fork gets for every secret.
 export interface ModelEnv {
   GEMINI_API_KEY?: string | undefined;
   ANTHROPIC_API_KEY?: string | undefined;
@@ -26,31 +17,26 @@ export interface ModelEnv {
 
 export interface ResolvedModel {
   provider: ProviderId;
-  // The ID sent to the API, with any provider prefix that only picked the route removed.
+  // Without any provider prefix that only picked the route.
   model: string;
   tier: Tier;
-  // The API's base URL without a trailing slash, and its host for logs.
   baseUrl: string;
   host: string;
   // Absent only for an OPENAI_BASE_URL endpoint that takes no key, such as a local server.
   apiKey: string | undefined;
   // Why this route was picked, for the startup log line.
   reason: string;
-  // True when the input was blank and the provider's default was used.
   isDefault: boolean;
 }
 
 export interface ResolveModelOptions {
-  // The input's name as the user sees it, such as `model-pro`, for log lines and errors.
+  // The input's name, such as `model-pro`, for messages.
   input: string;
-  // The input's value; blank means the default for the first key set.
   value: string | undefined;
   env: ModelEnv;
-  // Each action's own default model per provider.
   defaults: Record<ProviderId, string>;
 }
 
-/** A model input that can't be resolved. Its message names the input, the model and what to change. */
 export class ModelResolutionError extends Error {
   constructor(message: string) {
     super(message);
@@ -72,7 +58,6 @@ const FIRST_PARTY_BASE_URLS: Record<ProviderId, string> = {
   openai: 'https://api.openai.com/v1',
 };
 
-// Names that identify their provider without a prefix.
 // `gpt-oss` is left out because it is an open-weight family served by many hosts.
 const RECOGNIZED_NAMES: Record<ProviderId, RegExp> = {
   gemini: /^(gemini-|models\/|tunedModels\/)/i,
@@ -80,7 +65,6 @@ const RECOGNIZED_NAMES: Record<ProviderId, RegExp> = {
   openai: /^(gpt-(?!oss)|ft:gpt-)/i,
 };
 
-// The official family on each first-party API: Gemini 3.x (including the `-latest` aliases), Claude 5.5, and GPT-6.x.
 const OFFICIAL_FAMILIES: Record<ProviderId, RegExp> = {
   gemini: /^(models\/)?(gemini-3(\.\d+)?-.+|gemini-.+-latest)$/,
   anthropic: /^claude-(haiku|sonnet|opus)-5-5$/,
@@ -106,10 +90,6 @@ function withoutTrailingSlash(url: string): string {
   return url.replace(/\/+$/, '');
 }
 
-/**
- * The OPENAI_BASE_URL endpoint, which decides where the key and the issue text go.
- * It must be https, except on loopback, and carry no user name or password, which fetch would print in its errors.
- */
 function parseEndpoint(value: string): { baseUrl: string; host: string } {
   let url: URL;
   try {
@@ -148,7 +128,6 @@ interface Route {
  *   So does any unrecognized name without a prefix, whichever keys are set, because the endpoint is the only place that knows its models.
  * - Without OPENAI_BASE_URL, any other name goes to the only provider with a key.
  * - A blank input uses the default for the first key set, in the order Gemini, Anthropic, OpenAI.
- * Throws ModelResolutionError with a message that names the input, the model and the key or setting to fix.
  */
 export function resolveModel(options: ResolveModelOptions): ResolvedModel {
   const { input, env, defaults } = options;
@@ -194,7 +173,6 @@ function routeNamed(
     throw new ModelResolutionError(`${input} "${value}" uses ":" after the provider. Did you mean "${colon[1]}/${colon[2]}"? "/" separates the provider from the model.`);
   }
 
-  // A provider with its key serves the name itself; otherwise OPENAI_BASE_URL takes it as `endpointModel`, or the missing key is named.
   const routeTo = (provider: ProviderId, model: string, endpointModel: string): Route => {
     if (keys[provider] && !(provider === 'openai' && endpoint)) return { provider, model, reason: `set by ${input}` };
     if (endpoint) return { provider: 'openai', model: endpointModel, reason: `set by ${input}; sent to OPENAI_BASE_URL` };
@@ -217,7 +195,6 @@ function routeNamed(
 
   if (endpoint) return { provider: 'openai', model: value, reason: `set by ${input}; sent to OPENAI_BASE_URL` };
 
-  // An unrecognized name, such as `gemma-*`, a preview name, or `o3`, goes to the only provider with a key.
   const keyed = PROVIDERS.filter(id => keys[id]);
   if (keyed.length === 1) {
     const provider = keyed[0]!;
@@ -250,7 +227,6 @@ function bind(
   if (provider === 'openai' && endpoint) {
     baseUrl = endpoint.baseUrl;
   } else if (provider === 'gemini') {
-    // GOOGLE_GEMINI_BASE_URL sends Gemini requests to another host, such as a proxy, as it did with @google/genai.
     baseUrl = withoutTrailingSlash(present(env.GOOGLE_GEMINI_BASE_URL) ?? FIRST_PARTY_BASE_URLS.gemini);
   } else {
     baseUrl = FIRST_PARTY_BASE_URLS[provider];
@@ -273,7 +249,6 @@ function bind(
 /**
  * The resolved route for the startup log, e.g. `claude-haiku-5-5 via anthropic [official] — default for ANTHROPIC_API_KEY`.
  * The host is named whenever it isn't the provider's own API, because it decides where the key and the issue text go.
- * Keys are never included.
  */
 export function describeModel(resolved: ResolvedModel): string {
   const host = resolved.host === hostOf(FIRST_PARTY_BASE_URLS[resolved.provider]) ? '' : ` at ${resolved.host}`;

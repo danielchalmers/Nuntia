@@ -1,12 +1,8 @@
-// Source: AutoTriage (danielchalmers/AutoTriage, src/llm/). Nuntia copies this folder verbatim, so change it in AutoTriage and copy it over in a paired PR.
 import { withRetries } from './retry';
 import { createModelFetch, MODEL_TIMEOUT_MS, requestJson, type Fetch } from './transport';
 import { ModelApiError, ModelError, type CacheInfo, type Failure, type JsonRequest, type JsonResult, type ModelUsage, type TextRequest, type TextResult } from './types';
 
-// Gemini API adapter, sending the same requests @google/genai sent before it was replaced.
-// A recorded fixture of those requests is checked against every call in the tests.
-
-// Single source of truth for the thinking budget, also stamped into run telemetry.
+// Also stamped into run telemetry.
 export const THINKING_LEVEL = 'HIGH';
 
 const DEFAULT_BASE_URL = 'https://generativelanguage.googleapis.com/';
@@ -19,13 +15,9 @@ export class GeminiResponseError extends ModelError {
   }
 }
 
-// Finish reasons that mean Gemini declined to answer, so asking again would most likely be declined too.
+// Finish reasons that mean Gemini declined to answer.
 const REFUSAL_FINISH_REASONS = new Set(['SAFETY', 'RECITATION', 'BLOCKLIST', 'PROHIBITED_CONTENT', 'SPII', 'IMAGE_SAFETY']);
 
-/**
- * The model's path in request URLs, following @google/genai's rules for the Gemini API.
- * `models/` and `tunedModels/` names pass through unchanged, and any other name gets `models/` in front.
- */
 export function geminiModelPath(model: string): string {
   if (!model) {
     throw new Error('model is required and must be a string');
@@ -36,7 +28,6 @@ export function geminiModelPath(model: string): string {
   return model.startsWith('models/') || model.startsWith('tunedModels/') ? model : `models/${model}`;
 }
 
-// A bare cache ID gets the `cachedContents/` prefix, as @google/genai added it.
 function cachedContentName(name: string): string {
   return !name.startsWith('cachedContents/') && name.split('/').length === 1 ? `cachedContents/${name}` : name;
 }
@@ -45,10 +36,6 @@ function userContent(text: string) {
   return { parts: [{ text }], role: 'user' };
 }
 
-/**
- * The generateContent request body.
- * Fields are added in the order @google/genai serialized them, so the body is byte-for-byte the same.
- */
 export function generateContentBody(request: JsonRequest) {
   return {
     contents: [userContent(request.userPrompt)],
@@ -58,7 +45,6 @@ export function generateContentBody(request: JsonRequest) {
       : { systemInstruction: userContent(request.systemPrompt) }),
     generationConfig: {
       responseMimeType: 'application/json',
-      // The caller writes the schema in this API's own dialect, so it is sent as is.
       responseSchema: request.schema,
       thinkingConfig: {
         includeThoughts: true,
@@ -77,10 +63,6 @@ function tokenCount(value: unknown): number {
   return typeof value === 'number' ? value : 0;
 }
 
-/**
- * The text-only generateContent request body, with no schema or thinking settings, as Nuntia sends it.
- * @google/genai sent an empty generationConfig for Nuntia's text call, so it is kept to send the same bytes.
- */
 export function generateTextBody(request: TextRequest) {
   return {
     contents: [userContent(request.userPrompt)],
@@ -89,11 +71,6 @@ export function generateTextBody(request: TextRequest) {
   };
 }
 
-/**
- * Split a generateContent response into the answer text and the model's thoughts, and read its token usage.
- * Thought parts are kept out of the answer text, so they never reach JSON.parse.
- * A blocked prompt or a refusal finish throws a refusal, and a MAX_TOKENS finish throws as truncated, before any text is read.
- */
 function readReply(response: unknown): { text: string; thoughts: string; usage: ModelUsage } {
   const { blockReason, blockReasonMessage } = asRecord(asRecord(response).promptFeedback);
   // BLOCKED_REASON_UNSPECIFIED is the enum's default value, not a block.
@@ -137,7 +114,7 @@ function readReply(response: unknown): { text: string; thoughts: string; usage: 
     .replace(/(\r?\n\s*){2,}/g, '\n')
     .trim();
 
-  // thoughtsTokenCount is the hidden thinking budget Gemini 3 spends before emitting candidates; it is billed but excluded from candidatesTokenCount, so capture it explicitly to make per-pass thinking cost measurable.
+  // Thinking is billed but left out of candidatesTokenCount.
   const usage = asRecord(asRecord(response).usageMetadata);
   return {
     text,
@@ -170,7 +147,7 @@ export class GeminiClient {
   constructor(apiKey: string, fetch: Fetch = createModelFetch()) {
     this.apiKey = apiKey;
     this.fetch = fetch;
-    // GOOGLE_GEMINI_BASE_URL sends requests to another host, such as a proxy, as it did with @google/genai.
+    // GOOGLE_GEMINI_BASE_URL sends requests to another host, such as a proxy.
     const baseUrl = process.env.GOOGLE_GEMINI_BASE_URL?.trim() || DEFAULT_BASE_URL;
     this.baseUrl = baseUrl.endsWith('/') ? baseUrl.slice(0, -1) : baseUrl;
   }
@@ -192,10 +169,6 @@ export class GeminiClient {
     });
   }
 
-  /**
-   * Create a context cache for the given system prompt and model.
-   * Returns the cache resource name to be used in subsequent generateContent calls.
-   */
   async createCache(model: string, systemPrompt: string, displayName?: string): Promise<CacheInfo> {
     const cache = asRecord(await this.request('POST', 'cachedContents', {
       model: geminiModelPath(model),
@@ -212,9 +185,6 @@ export class GeminiClient {
     };
   }
 
-  /**
-   * Delete a previously created context cache.
-   */
   async deleteCache(name: string): Promise<void> {
     try {
       await this.request('DELETE', cachedContentName(name), {});
@@ -223,11 +193,6 @@ export class GeminiClient {
     }
   }
 
-  /**
-   * Call the model and parse its JSON reply, retrying as withRetries describes.
-   * `validate`, when given, narrows the parsed reply; a reply it rejects by throwing counts as an ordinary failure, like a parse error.
-   * A 403 or 404 on a cached call fails only this call, because the cache may have expired during a long run, and that says nothing about the key or the model.
-   */
   generateJson<T = unknown>(
     request: JsonRequest,
     maxRetries: number,
@@ -237,6 +202,7 @@ export class GeminiClient {
     return withRetries(async () => {
       const response = await this.request('POST', `${geminiModelPath(request.model)}:generateContent`, generateContentBody(request))
         .catch((err: unknown) => {
+          // The cache may have expired during a long run, which says nothing about the key or the model.
           if (request.cacheName && err instanceof ModelApiError && (err.status === 403 || err.status === 404)) {
             throw new ModelApiError(err.message, err.status, { failure: { kind: 'permanent' } });
           }
@@ -248,10 +214,6 @@ export class GeminiClient {
     }, maxRetries, initialBackoffMs, ms => this.sleep(ms));
   }
 
-  /**
-   * Call the model for a plain text reply, retrying as withRetries describes.
-   * The answer is trimmed, and a reply with no text left is retried like an empty one.
-   */
   generateText(request: TextRequest, maxRetries: number, initialBackoffMs: number): Promise<TextResult> {
     return withRetries(async () => {
       const reply = readReply(await this.request('POST', `${geminiModelPath(request.model)}:generateContent`, generateTextBody(request)));
