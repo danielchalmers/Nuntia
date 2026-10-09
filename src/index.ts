@@ -2,7 +2,7 @@ import * as core from '@actions/core';
 import { getConfig } from './env';
 import { GitHubClient } from './github';
 import { buildReleaseContext, releaseInputs } from './context';
-import { buildPrompt, fetchPrompt } from './prompt';
+import { buildPrompt, loadPrompt } from './prompt';
 import { ChatClient } from './llm/chat';
 import { describeEndpoint } from './llm/endpoint';
 import { writeTextFile } from './storage';
@@ -15,11 +15,14 @@ async function run(): Promise<void> {
   console.log(`Model: ${describeEndpoint(cfg.endpoint)}`);
   console.log('Inputs:', releaseInputs(cfg));
 
+  // The prompt comes first, so a prompt-url that can't be fetched fails the run before it reads the release.
+  const prompt = await loadPrompt(cfg.promptUrl);
+  console.log(`Prompt: ${prompt.source}`);
+
   const context = await buildReleaseContext(cfg, gh);
   console.log(`Commit range resolved: ${context.range.totalCommits} commit(s), ${context.linkedItems.length} linked item(s).`);
 
-  const promptText = await fetchPrompt(cfg.promptUrl);
-  const { systemPrompt, userPrompt } = buildPrompt(context, promptText);
+  const { systemPrompt, userPrompt } = buildPrompt(context, prompt.text);
   const request = { model: cfg.model, systemPrompt, userPrompt };
 
   // Write the debug artifacts before calling the model so a failed generation still leaves them on disk for a workflow whose upload step runs on failure (e.g. `if: always()`).

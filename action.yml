@@ -16,9 +16,9 @@ inputs:
     description: "Branch name associated with the release notes."
     required: true
   prompt-url:
-    description: "URL for prompt template."
-    required: true
-    default: "https://raw.githubusercontent.com/danielchalmers/Nuntia/refs/heads/main/examples/Nuntia.prompt"
+    description: "Raw URL of a prompt to use instead of the one bundled with the action, such as a gist or a raw file, for trying a prompt without committing it. Blank uses the bundled prompt."
+    required: false
+    default: ""
   model:
     description: "Model. Blank uses the default for the API key you set (gemini-flash-latest for GEMINI_API_KEY, claude-sonnet-5-5 for ANTHROPIC_API_KEY, gpt-6.1-sol for OPENAI_API_KEY)."
     required: false

@@ -1,6 +1,10 @@
-import { describe, it, expect, vi, afterEach } from 'vitest';
-import { buildPrompt, fetchPrompt } from '../src/prompt';
+import * as fs from 'fs';
+import { describe, it, expect, vi, afterEach, beforeEach, type MockInstance } from 'vitest';
+import { buildPrompt, loadPrompt } from '../src/prompt';
 import type { ReleaseContext } from '../src/types';
+
+const PROMPT_URL = 'https://example.com/prompt.txt';
+const HINT = 'Check prompt-url, or leave it blank to use the bundled prompt.';
 
 describe('buildPrompt', () => {
   const context: ReleaseContext = {
@@ -9,7 +13,7 @@ describe('buildPrompt', () => {
       baseCommit: 'a1b2c3d',
       headCommit: 'd4e5f6g',
       branch: 'main',
-      promptUrl: 'https://example.com/prompt.txt',
+      promptUrl: '',
       model: 'gemini-3.5-flash-lite',
       maxLinkedItems: 3,
       maxReferenceDepth: 2,
@@ -31,10 +35,10 @@ describe('buildPrompt', () => {
     ],
   };
 
-  it('puts the fetched prompt in the system prompt, followed by the input guidance', () => {
-    const { systemPrompt } = buildPrompt(context, 'Test prompt content');
+  it('uses the prompt unchanged as the system prompt', () => {
+    const { systemPrompt } = buildPrompt(context, 'Test prompt content\n');
 
-    expect(systemPrompt.startsWith('Test prompt content\n\n=== INPUT GUIDANCE ===')).toBe(true);
+    expect(systemPrompt).toBe('Test prompt content\n');
   });
 
   it('sends the complete release context as JSON in the user prompt', () => {
@@ -46,53 +50,112 @@ describe('buildPrompt', () => {
   });
 });
 
-describe('fetchPrompt', () => {
-  // stubGlobal restores the real fetch in afterEach, including when an assertion throws.
-  afterEach(() => vi.unstubAllGlobals());
+describe('loadPrompt', () => {
+  let warn: MockInstance;
 
-  function stubFetch(response: Record<string, unknown>) {
-    const fetchMock = vi.fn().mockResolvedValue(response);
+  beforeEach(() => {
+    warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+  });
+
+  // stubGlobal restores the real fetch in afterEach, including when an assertion throws.
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+    vi.useRealTimers();
+  });
+
+  // Answers each request with the next result in turn: a response to build, or an error to throw.
+  function stubFetch(...results: Array<{ status?: number; statusText?: string; body?: string } | Error>) {
+    const fetchMock = vi.fn(async () => {
+      const next = results.length > 1 ? results.shift() : results[0];
+      if (next === undefined) throw new Error('unexpected request');
+      if (next instanceof Error) throw next;
+      return new Response(next.body ?? '', { status: next.status ?? 200, statusText: next.statusText ?? '' });
+    });
     vi.stubGlobal('fetch', fetchMock);
     return fetchMock;
   }
 
-  it('fetches prompt text from the trimmed url', async () => {
-    const fetchMock = stubFetch({ ok: true, text: async () => 'Test prompt content' });
+  // Runs the retry waits on a fake clock, so a test that retries doesn't wait on the real one.
+  async function loadWithRetries(promptUrl: string) {
+    vi.useFakeTimers();
+    const result = loadPrompt(promptUrl).then(
+      prompt => ({ prompt }),
+      (error: unknown) => ({ error: error instanceof Error ? error.message : String(error) })
+    );
+    await vi.runAllTimersAsync();
+    return result;
+  }
 
-    const promptText = await fetchPrompt('  https://example.com/prompt.txt\n');
+  it('uses the prompt bundled from examples/Nuntia.prompt without fetching when the url is blank', async () => {
+    const fetchMock = stubFetch();
 
-    expect(fetchMock).toHaveBeenCalledWith('https://example.com/prompt.txt');
-    expect(promptText).toBe('Test prompt content');
-  });
+    const prompt = await loadPrompt('');
 
-  it('rejects an empty url without making a request', async () => {
-    const fetchMock = stubFetch({ ok: true, text: async () => 'unused' });
-
-    await expect(fetchPrompt('   ')).rejects.toThrow('Prompt URL is required and cannot be empty.');
+    expect(prompt).toEqual({ text: fs.readFileSync(new URL('../examples/Nuntia.prompt', import.meta.url), 'utf8'), source: 'built-in' });
+    expect(prompt.text).toContain('You are Nuntia');
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it('throws when the url fetch fails', async () => {
-    stubFetch({ ok: false, status: 404, statusText: 'Not Found', text: async () => 'Missing prompt' });
+  it('fetches the prompt from the url with a timeout', async () => {
+    const fetchMock = stubFetch({ body: 'Test prompt content' });
 
-    await expect(fetchPrompt('https://example.com/missing.txt')).rejects.toThrow(
-      'Failed to fetch prompt from https://example.com/missing.txt: 404 Not Found'
-    );
+    const prompt = await loadPrompt(PROMPT_URL);
+
+    expect(prompt).toEqual({ text: 'Test prompt content', source: PROMPT_URL });
+    expect(fetchMock).toHaveBeenCalledWith(PROMPT_URL, { signal: expect.any(AbortSignal) });
   });
 
-  it('throws when the prompt is blank', async () => {
-    stubFetch({ ok: true, text: async () => ' \n\t ' });
+  it.each([400, 401, 403, 404])('fails at once on HTTP %i, which retrying cannot fix', async (status) => {
+    const fetchMock = stubFetch({ status, statusText: 'Nope', body: 'Missing prompt' });
 
-    await expect(fetchPrompt('https://example.com/blank.txt')).rejects.toThrow(
-      'Prompt at https://example.com/blank.txt is empty.'
-    );
+    await expect(loadPrompt(PROMPT_URL)).rejects.toThrow(`Failed to fetch prompt from ${PROMPT_URL}: ${status} Nope. ${HINT}`);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
-  it('names the url when the request itself fails', async () => {
-    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new TypeError('fetch failed')));
+  it('fails at once when the prompt is blank', async () => {
+    const fetchMock = stubFetch({ body: ' \n\t ' });
 
-    await expect(fetchPrompt('https://example.com/prompt.txt')).rejects.toThrow(
-      'Failed to fetch prompt from https://example.com/prompt.txt: fetch failed'
-    );
+    await expect(loadPrompt(PROMPT_URL)).rejects.toThrow(`Prompt at ${PROMPT_URL} is empty. ${HINT}`);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([408, 429, 500, 502, 503])('retries HTTP %i, and uses the prompt once it arrives', async (status) => {
+    const fetchMock = stubFetch({ status, statusText: 'Busy' }, { body: 'Test prompt content' });
+
+    const result = await loadWithRetries(PROMPT_URL);
+
+    expect(result).toEqual({ prompt: { text: 'Test prompt content', source: PROMPT_URL } });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(warn).toHaveBeenCalledWith(`Failed to fetch prompt from ${PROMPT_URL}; retrying in 5s: ${status} Busy`);
+  });
+
+  it('retries a network failure, naming its cause', async () => {
+    const fetchMock = stubFetch(Object.assign(new TypeError('fetch failed'), { cause: { code: 'ECONNRESET' } }), { body: 'Test prompt content' });
+
+    const result = await loadWithRetries(PROMPT_URL);
+
+    expect(result).toEqual({ prompt: { text: 'Test prompt content', source: PROMPT_URL } });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('fetch failed (ECONNRESET)'));
+  });
+
+  it('gives up after three attempts, naming the last failure', async () => {
+    const fetchMock = stubFetch({ status: 503, statusText: 'Service Unavailable' });
+
+    const result = await loadWithRetries(PROMPT_URL);
+
+    expect(result).toEqual({ error: `Failed to fetch prompt from ${PROMPT_URL} after 3 attempts: 503 Service Unavailable. ${HINT}` });
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(warn).toHaveBeenCalledTimes(2);
+  });
+
+  it('retries a request that times out, and says so when it keeps timing out', async () => {
+    const fetchMock = stubFetch(new DOMException('The operation was aborted due to timeout', 'TimeoutError'));
+
+    const result = await loadWithRetries(PROMPT_URL);
+
+    expect(result).toEqual({ error: `Failed to fetch prompt from ${PROMPT_URL} after 3 attempts: no response within 30s. ${HINT}` });
+    expect(fetchMock).toHaveBeenCalledTimes(3);
   });
 });

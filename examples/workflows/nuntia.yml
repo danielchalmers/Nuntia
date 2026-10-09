@@ -14,9 +14,9 @@ on:
         required: true
         default: "main"
       prompt-url:
-        description: "Prompt URL (raw)"
-        required: true
-        default: "https://raw.githubusercontent.com/danielchalmers/Nuntia/refs/heads/main/examples/Nuntia.prompt"
+        description: "Raw prompt URL to try (blank uses the bundled prompt)"
+        required: false
+        default: ""
       model:
         description: "Model (blank uses the default for the API key)"
         required: false
@@ -30,7 +30,6 @@ jobs:
       issues: read
       pull-requests: read
     steps:
-      - uses: actions/checkout@v7
       - name: Generate release notes
         id: nuntia
         uses: danielchalmers/Nuntia@main
