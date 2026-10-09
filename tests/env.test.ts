@@ -15,8 +15,6 @@ vi.mock('@actions/core', () => ({
 import * as github from '@actions/github';
 import { getConfig } from '../src/env';
 
-const REQUIRED_INPUTS = { 'base-commit': 'base-sha', 'head-commit': 'head-sha', branch: 'main' };
-
 function setInputs(values: Record<string, string>) {
   mocks.getInput.mockImplementation((name: string) => values[name] ?? '');
 }
@@ -29,9 +27,13 @@ beforeEach(() => {
   vi.stubEnv('OPENAI_API_KEY', '');
   vi.stubEnv('OPENAI_BASE_URL', '');
   vi.stubEnv('GITHUB_REPOSITORY', 'acme/widgets');
-  // On GitHub Actions the context loads the triggering event's payload at import; clear it so it can't stand in for GITHUB_REPOSITORY.
+  vi.stubEnv('GITHUB_HEAD_REF', '');
+  // On GitHub Actions the context loads the triggering event at import; replace it so the runner's own event can't leak in.
   github.context.payload = {};
-  setInputs(REQUIRED_INPUTS);
+  github.context.eventName = 'push';
+  github.context.ref = 'refs/heads/main';
+  github.context.sha = 'run-sha';
+  setInputs({});
 });
 
 afterEach(() => {
@@ -44,9 +46,6 @@ describe('getConfig', () => {
     expect(getConfig()).toEqual({
       owner: 'acme',
       repo: 'widgets',
-      branch: 'main',
-      baseCommit: 'base-sha',
-      headCommit: 'head-sha',
       token: 'token',
       promptUrl: '',
       model: 'gemini-flash-latest',
@@ -59,9 +58,7 @@ describe('getConfig', () => {
         keyName: 'GEMINI_API_KEY',
         isDefault: true,
       },
-      maxLinkedItems: 5,
-      maxReferenceDepth: 2,
-      maxItemLength: 5000,
+      trigger: { eventName: 'push', ref: 'refs/heads/main', sha: 'run-sha', headRef: '' },
     });
   });
 
@@ -97,7 +94,7 @@ describe('getConfig', () => {
 
   it('picks the provider from the model name when several keys are set', () => {
     vi.stubEnv('ANTHROPIC_API_KEY', 'anthropic-key');
-    setInputs({ ...REQUIRED_INPUTS, model: 'claude-opus-5-5' });
+    setInputs({ model: 'claude-opus-5-5' });
 
     expect(getConfig()).toMatchObject({ model: 'claude-opus-5-5', endpoint: { provider: 'anthropic', apiKey: 'anthropic-key' } });
   });
@@ -106,36 +103,12 @@ describe('getConfig', () => {
     vi.stubEnv('GEMINI_API_KEY', '');
     vi.stubEnv('OPENAI_API_KEY', 'router-key');
     vi.stubEnv('OPENAI_BASE_URL', 'https://openrouter.ai/api/v1/');
-    setInputs({ ...REQUIRED_INPUTS, model: 'anthropic/claude-sonnet-5.5' });
+    setInputs({ model: 'anthropic/claude-sonnet-5.5' });
 
     expect(getConfig()).toMatchObject({
       model: 'anthropic/claude-sonnet-5.5',
       endpoint: { provider: 'openai', baseUrl: 'https://openrouter.ai/api/v1', host: 'openrouter.ai' },
     });
-  });
-
-  it.each(['base-commit', 'head-commit', 'branch'])('requires the %s input', (name) => {
-    setInputs({ ...REQUIRED_INPUTS, [name]: '' });
-
-    expect(() => getConfig()).toThrow(`Missing required input: ${name}.`);
-  });
-
-  it('rejects a branch input that is only whitespace', () => {
-    setInputs({ ...REQUIRED_INPUTS, branch: '   ' });
-
-    expect(() => getConfig()).toThrow('Missing required input: branch.');
-  });
-
-  it('targets another repository when branch uses owner/repo@branch', () => {
-    setInputs({ ...REQUIRED_INPUTS, branch: 'other-org/other-repo@release/2.x' });
-
-    expect(getConfig()).toMatchObject({ owner: 'other-org', repo: 'other-repo', branch: 'release/2.x' });
-  });
-
-  it.each(['other-org/other-repo@', 'other-org/other-repo@   '])('rejects %j instead of treating it as a branch name', (branch) => {
-    setInputs({ ...REQUIRED_INPUTS, branch });
-
-    expect(() => getConfig()).toThrow('Branch input uses owner/repo@branch format but branch is empty.');
   });
 
   it('falls back to the event payload repository when GITHUB_REPOSITORY is unset', () => {
@@ -145,61 +118,83 @@ describe('getConfig', () => {
     expect(getConfig()).toMatchObject({ owner: 'payload-owner', repo: 'payload-repo' });
   });
 
-  it('accepts owner/repo@branch without any repository context', () => {
-    vi.stubEnv('GITHUB_REPOSITORY', '');
-    setInputs({ ...REQUIRED_INPUTS, branch: 'other-org/other-repo@main' });
-
-    expect(getConfig()).toMatchObject({ owner: 'other-org', repo: 'other-repo', branch: 'main' });
-  });
-
-  it('asks for owner/repo@branch when a plain branch has no repository context', () => {
+  it('fails without repository context', () => {
     vi.stubEnv('GITHUB_REPOSITORY', '');
 
-    expect(() => getConfig()).toThrow(/Failed to resolve repository context.*pass branch as owner\/repo@branch/);
+    expect(() => getConfig()).toThrow('Failed to resolve repository context (owner/repo). Ensure this runs in GitHub Actions with a valid repository context.');
   });
 
-  it('treats a branch containing slashes but no @ as a plain branch name', () => {
-    setInputs({ ...REQUIRED_INPUTS, branch: 'feature/login' });
+  it('ignores the removed range and tuning inputs', () => {
+    setInputs({ 'base-commit': 'base-sha', 'head-commit': 'head-sha', branch: 'other-org/other-repo@main', 'max-linked-items': '1' });
 
-    expect(getConfig()).toMatchObject({ owner: 'acme', repo: 'widgets', branch: 'feature/login' });
+    expect(getConfig()).toMatchObject({ owner: 'acme', repo: 'widgets', trigger: { ref: 'refs/heads/main', sha: 'run-sha' } });
+    expect(mocks.getInput.mock.calls.map(([name]) => name).sort()).toEqual(['model', 'prompt-url']);
   });
 
-  it('floors numeric limits and clamps negatives to zero', () => {
-    setInputs({
-      ...REQUIRED_INPUTS,
-      'max-linked-items': '2.9',
-      'max-reference-depth': '-3',
-      'max-item-length': '0',
+  it('reads the release from a release event', () => {
+    github.context.eventName = 'release';
+    github.context.ref = 'refs/tags/v1.2.0';
+    github.context.payload = {
+      release: { tag_name: 'v1.2.0', name: ' Widgets 1.2 ', body: 'Notes', prerelease: true, target_commitish: 'dev' },
+    } as any;
+
+    expect(getConfig().trigger).toEqual({
+      eventName: 'release',
+      ref: 'refs/tags/v1.2.0',
+      sha: 'run-sha',
+      headRef: '',
+      release: { tag: 'v1.2.0', name: 'Widgets 1.2', body: 'Notes', prerelease: true, targetCommitish: 'dev' },
     });
-
-    expect(getConfig()).toMatchObject({ maxLinkedItems: 2, maxReferenceDepth: 0, maxItemLength: 0 });
   });
 
-  it('falls back to defaults for non-numeric limits', () => {
-    setInputs({
-      ...REQUIRED_INPUTS,
-      'max-linked-items': 'many',
-      'max-reference-depth': 'deep',
-      'max-item-length': 'Infinity',
-    });
+  it('treats a missing release name and body as empty', () => {
+    github.context.eventName = 'release';
+    github.context.payload = { release: { tag_name: 'v1.2.0', name: null, body: null } } as any;
 
-    expect(getConfig()).toMatchObject({ maxLinkedItems: 5, maxReferenceDepth: 2, maxItemLength: 5000 });
+    expect(getConfig().trigger.release).toEqual({ tag: 'v1.2.0', name: null, body: '', prerelease: false, targetCommitish: '' });
+  });
+
+  it('fails when a release event carries no release', () => {
+    github.context.eventName = 'release';
+
+    expect(() => getConfig()).toThrow('The release event has no release in its payload.');
+  });
+
+  it('fails when the release has no tag', () => {
+    github.context.eventName = 'release';
+    github.context.payload = { release: { name: 'Untagged' } } as any;
+
+    expect(() => getConfig()).toThrow('The release has no tag name.');
+  });
+
+  it('ignores a release in the payload of any other event', () => {
+    github.context.payload = { release: { tag_name: 'v1.2.0' } } as any;
+
+    expect(getConfig().trigger.release).toBeUndefined();
+  });
+
+  it("reads a pull request's branch from GITHUB_HEAD_REF", () => {
+    vi.stubEnv('GITHUB_HEAD_REF', 'feature/login');
+    github.context.eventName = 'pull_request';
+    github.context.ref = 'refs/pull/7/merge';
+
+    expect(getConfig().trigger).toMatchObject({ eventName: 'pull_request', ref: 'refs/pull/7/merge', headRef: 'feature/login' });
   });
 
   it('passes the model and prompt URL inputs through', () => {
-    setInputs({ ...REQUIRED_INPUTS, model: 'gemini-custom', 'prompt-url': ' https://example.com/p.txt\n' });
+    setInputs({ model: 'gemini-custom', 'prompt-url': ' https://example.com/p.txt\n' });
 
     expect(getConfig()).toMatchObject({ model: 'gemini-custom', promptUrl: 'https://example.com/p.txt', endpoint: { provider: 'gemini' } });
   });
 
   it('treats a prompt-url of only whitespace as blank, so the bundled prompt is used', () => {
-    setInputs({ ...REQUIRED_INPUTS, 'prompt-url': '  \n' });
+    setInputs({ 'prompt-url': '  \n' });
 
     expect(getConfig()).toMatchObject({ promptUrl: '' });
   });
 
   it.each(['examples/Nuntia.prompt', 'file:///etc/passwd', 'ftp://example.com/p.txt'])('rejects a prompt-url of %j, which is not an http or https URL', (promptUrl) => {
-    setInputs({ ...REQUIRED_INPUTS, 'prompt-url': promptUrl });
+    setInputs({ 'prompt-url': promptUrl });
 
     expect(() => getConfig()).toThrow(`prompt-url must be an http or https URL, or blank to use the bundled prompt: ${promptUrl}`);
   });

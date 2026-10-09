@@ -1,20 +1,11 @@
 name: "Nuntia"
-description: "Generate release notes and migration guides from a commit range on demand."
+description: "Generate release notes and migration guides for each GitHub release, or preview the next one."
 author: "Daniel Chalmers"
 branding:
   color: "green"
   icon: "file-text"
 
 inputs:
-  base-commit:
-    description: "Start commit SHA (inclusive) for the release notes range."
-    required: true
-  head-commit:
-    description: "End commit SHA (inclusive) for the release notes range."
-    required: true
-  branch:
-    description: "Branch name associated with the release notes."
-    required: true
   prompt-url:
     description: "Raw URL of a prompt to use instead of the one bundled with the action, such as a gist or a raw file, for trying a prompt without committing it. Blank uses the bundled prompt."
     required: false
@@ -23,18 +14,6 @@ inputs:
     description: "Model. Blank uses the default for the API key you set (gemini-flash-latest for GEMINI_API_KEY, claude-sonnet-5-5 for ANTHROPIC_API_KEY, gpt-6.1-sol for OPENAI_API_KEY)."
     required: false
     default: ""
-  max-linked-items:
-    description: "Cap on how many linked issues, PRs, or commits are fetched."
-    required: false
-    default: "5"
-  max-reference-depth:
-    description: "Depth to follow references inside linked descriptions."
-    required: false
-    default: "2"
-  max-item-length:
-    description: "Maximum length for each commit message and linked item title/body field."
-    required: false
-    default: "5000"
 
 outputs:
   release-notes-path:

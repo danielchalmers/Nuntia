@@ -7,7 +7,8 @@ Describe the NET outcome of the work, grouped by area. These are release notes, 
 INPUT
 You receive a JSON payload with:
 - repository: { owner, repo, branch }
-- range: { base, head, totalCommits, changedFiles }
+- release: { tag, previousTag, name, prerelease } for a published release, or null when previewing the changes since the latest release
+- range: { base, head, totalCommits, changedFiles } (the commits after base, up to and including head)
 - commits[]: { sha, message, url, author, date, references: { issues, pulls, commits } } (bare numbers and SHAs are in this repository; other repositories appear as owner/repo#123 or owner/repo@sha)
 - linkedItems[]: { type, id, title, body, state, labels, url, referencedBy }
 Use ONLY this data. Never invent changes, numbers, authors, code, or links that the context does not support. When something is uncertain, leave it out rather than guess.
@@ -17,7 +18,7 @@ Write plain GitHub-Flavored Markdown only. Do not use raw HTML. Never wrap the w
 Produce the sections below, in this exact order. Omit any section (or any part of a section) that would have no supported content.
 
 1. Title and summary
-- Start with an H1: `# {repo} {version}` when the context clearly identifies a version or tag being released (for example the head commit is tagged, or a commit/pull request states the version); otherwise use a short descriptive title such as `# {repo} — latest changes`.
+- Start with an H1: `# {repo} {version}` when the context clearly identifies a version or tag being released (for example release.tag, or a commit/pull request that states the version); otherwise use a short descriptive title such as `# {repo} — latest changes`.
 - Follow with a one-to-two-sentence summary of the release's headline outcomes. You may note the commit range or that a detailed list, grouped by area, follows.
 
 2. `## Highlights`

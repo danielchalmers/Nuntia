@@ -22,6 +22,46 @@ export type IssueOrPullDetails = {
   repo: string;
 };
 
+export type ReleaseDetails = {
+  tag: string;
+  name: string | null;
+  body: string;
+  prerelease: boolean;
+  // The branch or commit the release's tag was created from.
+  targetCommitish: string;
+};
+
+// Only GraphQL can order tags by the date of their commit.
+const NEWEST_TAG_QUERY = `query($owner: String!, $repo: String!) {
+  repository(owner: $owner, name: $repo) {
+    refs(refPrefix: "refs/tags/", first: 1, orderBy: { field: TAG_COMMIT_DATE, direction: DESC }) {
+      nodes { name }
+    }
+  }
+}`;
+
+/** The HTTP status of a failed GitHub request, if it has one. */
+export function httpStatus(error: unknown): number | undefined {
+  return typeof error === 'object' && error !== null && 'status' in error && typeof error.status === 'number' ? error.status : undefined;
+}
+
+/**
+ * Narrow a release from the REST API or from a release event's payload.
+ * Throws when it has no tag, because nothing else identifies the release.
+ */
+export function toReleaseDetails(data: any): ReleaseDetails {
+  const tag = typeof data?.tag_name === 'string' ? data.tag_name.trim() : '';
+  if (!tag) throw new Error('The release has no tag name.');
+  const name = typeof data?.name === 'string' ? data.name.trim() : '';
+  return {
+    tag,
+    name: name || null,
+    body: typeof data?.body === 'string' ? data.body : '',
+    prerelease: data?.prerelease === true,
+    targetCommitish: typeof data?.target_commitish === 'string' ? data.target_commitish : '',
+  };
+}
+
 export class GitHubClient {
   private octokit;
   private apiCallCount = 0;
@@ -166,6 +206,48 @@ export class GitHubClient {
       ref,
     });
     return this.mapCommit(data);
+  }
+
+  /** The published release for a tag, or undefined when the tag has none. */
+  async findReleaseByTag(tag: string): Promise<ReleaseDetails | undefined> {
+    this.incrementApiCalls();
+    try {
+      const { data } = await this.octokit.rest.repos.getReleaseByTag({ owner: this.owner, repo: this.repo, tag });
+      return toReleaseDetails(data);
+    } catch (error) {
+      if (httpStatus(error) === 404) return undefined;
+      throw error;
+    }
+  }
+
+  /** The release GitHub marks as latest, or undefined when the repository has no published release. */
+  async findLatestRelease(): Promise<ReleaseDetails | undefined> {
+    this.incrementApiCalls();
+    try {
+      const { data } = await this.octokit.rest.repos.getLatestRelease({ owner: this.owner, repo: this.repo });
+      return toReleaseDetails(data);
+    } catch (error) {
+      if (httpStatus(error) === 404) return undefined;
+      throw error;
+    }
+  }
+
+  /** The tag whose commit is newest, or undefined when the repository has no tags. */
+  async findNewestTag(): Promise<string | undefined> {
+    this.incrementApiCalls();
+    const data: any = await this.octokit.graphql(NEWEST_TAG_QUERY, { owner: this.owner, repo: this.repo });
+    const name = data?.repository?.refs?.nodes?.[0]?.name;
+    return typeof name === 'string' && name ? name : undefined;
+  }
+
+  /**
+   * The body GitHub would generate as release notes for a tag.
+   * It changes nothing, but GitHub still requires contents: write for it.
+   */
+  async generateReleaseNotes(tag: string): Promise<string> {
+    this.incrementApiCalls();
+    const { data } = await this.octokit.rest.repos.generateReleaseNotes({ owner: this.owner, repo: this.repo, tag_name: tag });
+    return typeof data?.body === 'string' ? data.body : '';
   }
 
   async getIssueOrPullRequest(owner: string, repo: string, issueNumber: number): Promise<IssueOrPullDetails> {

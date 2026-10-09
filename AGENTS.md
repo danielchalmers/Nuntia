@@ -4,7 +4,7 @@ This document provides comprehensive instructions for AI agents and developers w
 
 ## Project Overview
 
-Nuntia is a GitHub Action that generates release notes and migration guides from a commit range. It is built with TypeScript, requires Node.js 24+ for development, and runs on Node.js 24 in GitHub Actions.
+Nuntia is a GitHub Action that generates release notes and migration guides for a GitHub release, or previews the next release's notes. It is built with TypeScript, requires Node.js 24+ for development, and runs on Node.js 24 in GitHub Actions.
 
 ## Prerequisites
 
@@ -153,7 +153,7 @@ The project uses GitHub Actions for CI (`.github/workflows/ci.yml`):
 2. Runs type-checking
 3. Builds the project
 4. Verifies dist folder is up to date
-5. Runs a mock release-notes generation
+5. Runs a mock release-notes generation, which previews the next release: the commits after the latest release (or the newest tag) up to the CI commit
 6. Runs unit tests (separate workflow: `tests.yml`)
 
 ## Common Tasks
@@ -179,7 +179,8 @@ The action is defined in `action.yml` and runs from `dist/index.js`. Key points:
 
 - **Entry point**: `dist/index.js`
 - **Runtime**: Node.js 24 (specified in `action.yml`)
-- **Inputs**: Defined in `action.yml`
+- **Inputs**: Defined in `action.yml`. There are only `model` and `prompt-url`; the commit range comes from the release, and the context limits are constants in `src/context.ts`.
+- **Commit range** (`src/release.ts`): a `release` event uses the release in its payload, and a `workflow_dispatch` on a tag reads that tag's release. Either way the base comes from the release body's `**Full Changelog**: …/compare/BASE...TAG` link, which must point at this repository and tag, with `POST generate-notes` as the fallback. A `/commits/TAG` link is a first release, which logs a notice and exits 0. Any other run is a preview from the latest release (or the newest tag by commit date) to `GITHUB_SHA`, and never calls generate-notes, because that needs `contents: write`. The range is base-exclusive, matching the compare API.
 - **Default prompt**: `examples/Nuntia.prompt`, bundled into `dist/index.js` and used when `prompt-url` is blank. Editing it changes runtime output, so rebuild `dist/`.
 - **Prompt URL input**: `prompt-url` (optional) fetches a prompt to try without committing it, with a 30-second timeout and two retries. A prompt that still can't be fetched fails the run.
 - **Workspace**: the action reads everything through the GitHub API, so consumers need no checkout step.

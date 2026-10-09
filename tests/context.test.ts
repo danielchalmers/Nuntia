@@ -2,7 +2,7 @@ import { describe, it, expect, vi } from 'vitest';
 import * as core from '@actions/core';
 import { buildReleaseContext, releaseInputs } from '../src/context';
 import type { CommitDetails, GitHubClient } from '../src/github';
-import type { Config } from '../src/types';
+import type { Config, ReleaseRange } from '../src/types';
 
 // Mock @actions/core so warnings raised during tests (e.g. the changed-file truncation path) are captured as spies instead of being written to stdout as `::warning::` workflow commands, which the GitHub Actions runner would otherwise surface as spurious annotations on the test job.
 vi.mock('@actions/core', async (importActual) => {
@@ -10,12 +10,9 @@ vi.mock('@actions/core', async (importActual) => {
   return { ...actual, warning: vi.fn() };
 });
 
-const BASE_CONFIG: Config = {
+const CONFIG: Config = {
   owner: 'acme',
   repo: 'widgets',
-  branch: 'main',
-  baseCommit: 'a1b2c3d4',
-  headCommit: 'a1b2c3d4',
   token: 'token',
   promptUrl: 'https://example.com/prompt.txt',
   model: 'gemini-3.5-flash-lite',
@@ -28,14 +25,15 @@ const BASE_CONFIG: Config = {
     keyName: 'GEMINI_API_KEY',
     isDefault: false,
   },
-  maxLinkedItems: 3,
-  maxReferenceDepth: 2,
-  maxItemLength: 5000,
+  trigger: { eventName: 'release', ref: 'refs/tags/v1.1.0', sha: 'run-sha', headRef: '' },
 };
 
-function makeConfig(overrides: Partial<Config> = {}): Config {
-  return { ...BASE_CONFIG, ...overrides };
-}
+const RANGE: ReleaseRange = {
+  base: 'v1.0.0',
+  head: 'v1.1.0',
+  branch: 'main',
+  release: { tag: 'v1.1.0', previousTag: 'v1.0.0', name: 'Widgets 1.1', prerelease: false },
+};
 
 function makeCommit(overrides: Partial<CommitDetails> = {}): CommitDetails {
   return {
@@ -63,16 +61,16 @@ function makeIssue(overrides: Record<string, unknown> = {}) {
   };
 }
 
-// Matches an identical base==head range with no changed files; individual tests override what they exercise.
-const COMPARE_DEFAULTS = { commits: [], status: 'identical', totalCommits: 0, files: [] };
-
 /**
- * Build a GitHubClient stub.
- * Pass a plain object to have the method resolve to it, or a vi.fn() when the test needs to assert on how the method was called.
+ * Build a GitHubClient stub whose compare returns `commits` (one "Fixes #42" commit by default) as a complete range.
+ * Pass a plain object to have a lookup resolve to it, or a vi.fn() when the test needs to assert on how the lookup was called.
  */
-function makeClient(opts: { compare?: Record<string, unknown>; commit?: unknown; issue?: unknown } = {}): GitHubClient {
+function makeClient(
+  opts: { commits?: CommitDetails[]; compare?: Record<string, unknown>; commit?: unknown; issue?: unknown } = {}
+): GitHubClient {
+  const commits = opts.commits ?? [makeCommit()];
   return {
-    compareCommits: vi.fn().mockResolvedValue({ ...COMPARE_DEFAULTS, ...opts.compare }),
+    compareCommits: vi.fn().mockResolvedValue({ commits, status: 'ahead', totalCommits: commits.length, files: [], filesTruncated: false, ...opts.compare }),
     getCommit: typeof opts.commit === 'function' ? opts.commit : vi.fn().mockResolvedValue(opts.commit ?? makeCommit()),
     getIssueOrPullRequest:
       typeof opts.issue === 'function' ? opts.issue : vi.fn().mockResolvedValue(opts.issue ?? makeIssue()),
@@ -88,17 +86,57 @@ function issuesByNumber(issues: Record<number, ReturnType<typeof makeIssue>>) {
   });
 }
 
+function build(gh: GitHubClient, range: ReleaseRange = RANGE) {
+  return buildReleaseContext(CONFIG, range, gh);
+}
+
 describe('buildReleaseContext', () => {
+  it('compares the release with the previous one and leaves the base commit out', async () => {
+    const gh = makeClient({ commits: [makeCommit({ sha: 'b2c3d4e5f6a7', message: 'Add export' })] });
+
+    const context = await build(gh);
+
+    expect(gh.compareCommits).toHaveBeenCalledWith('v1.0.0', 'v1.1.0');
+    expect(gh.getCommit).not.toHaveBeenCalled();
+    expect(context.commits.map(commit => commit.sha)).toEqual(['b2c3d4e5f6a7']);
+    expect(context.range).toMatchObject({ base: 'v1.0.0', head: 'v1.1.0', totalCommits: 1 });
+  });
+
+  it('puts the release and the branch it was created from in the context', async () => {
+    const context = await build(makeClient());
+
+    expect(context.repository).toEqual({ owner: 'acme', repo: 'widgets', branch: 'main' });
+    expect(context.release).toEqual({ tag: 'v1.1.0', previousTag: 'v1.0.0', name: 'Widgets 1.1', prerelease: false });
+  });
+
+  it('has no release when previewing the next one', async () => {
+    const context = await build(makeClient(), { base: 'v1.1.0', head: 'run-sha', branch: 'dev', release: null });
+
+    expect(context.release).toBeNull();
+    expect(context.repository.branch).toBe('dev');
+    expect(context.range).toMatchObject({ base: 'v1.1.0', head: 'run-sha' });
+  });
+
+  it('builds an empty context when there are no commits after the base', async () => {
+    const gh = makeClient({ commits: [], compare: { status: 'identical' } });
+
+    const context = await build(gh);
+
+    expect(context.range).toMatchObject({ totalCommits: 0, status: 'identical' });
+    expect(context.commits).toEqual([]);
+    expect(context.linkedItems).toEqual([]);
+  });
+
   it('includes issue labels in linked item metadata', async () => {
     const gh = makeClient({
       compare: { files: ['src/index.ts'] },
       issue: makeIssue({ labels: ['bug', 'release-note'] }),
     });
 
-    const context = await buildReleaseContext(makeConfig(), gh);
+    const context = await build(gh);
 
     expect(context.linkedItems).toHaveLength(1);
-    expect(context.range).toMatchObject({ totalCommits: 1, changedFiles: ['src/index.ts'], status: 'identical' });
+    expect(context.range).toMatchObject({ totalCommits: 1, changedFiles: ['src/index.ts'], status: 'ahead' });
     expect(context.linkedItems[0]).toMatchObject({
       type: 'issue',
       id: '42',
@@ -108,7 +146,7 @@ describe('buildReleaseContext', () => {
 
   it('classifies (#123) references as pull requests and includes linked pull body', async () => {
     const gh = makeClient({
-      commit: makeCommit({ message: 'Rename and consolidate inputs (#57)' }),
+      commits: [makeCommit({ message: 'Rename and consolidate inputs (#57)' })],
       issue: makeIssue({
         number: 57,
         title: 'Rename and consolidate inputs',
@@ -119,7 +157,7 @@ describe('buildReleaseContext', () => {
       }),
     });
 
-    const context = await buildReleaseContext(makeConfig(), gh);
+    const context = await build(gh);
 
     expect(context.commits[0]?.references.issues).toEqual([]);
     expect(context.commits[0]?.references.pulls).toEqual([57]);
@@ -132,20 +170,16 @@ describe('buildReleaseContext', () => {
 
   it('resolves a commit URL in a message into a linked commit item', async () => {
     const linkedSha = 'abcdef1234567890abcdef1234567890abcdef12';
-    const getCommit = vi
-      .fn()
-      .mockResolvedValueOnce(makeCommit({ message: `Ports https://github.com/other/repo/commit/${linkedSha}` }))
-      .mockResolvedValueOnce(
-        makeCommit({
-          sha: linkedSha,
-          message: 'Upstream fix',
-          url: `https://github.com/other/repo/commit/${linkedSha}`,
-        })
-      );
+    const getCommit = vi.fn().mockResolvedValue(
+      makeCommit({ sha: linkedSha, message: 'Upstream fix', url: `https://github.com/other/repo/commit/${linkedSha}` })
+    );
 
-    const context = await buildReleaseContext(makeConfig(), makeClient({ commit: getCommit }));
+    const context = await build(
+      makeClient({ commits: [makeCommit({ message: `Ports https://github.com/other/repo/commit/${linkedSha}` })], commit: getCommit })
+    );
 
-    expect(getCommit).toHaveBeenCalledTimes(2);
+    expect(getCommit).toHaveBeenCalledTimes(1);
+    expect(getCommit).toHaveBeenCalledWith('other', 'repo', linkedSha);
     expect(context.linkedItems).toHaveLength(1);
     expect(context.linkedItems[0]).toMatchObject({
       type: 'commit',
@@ -159,12 +193,14 @@ describe('buildReleaseContext', () => {
 
   it('qualifies references made inside a linked item from another repository', async () => {
     const linkedSha = 'abcdef1234567890abcdef1234567890abcdef12';
-    const getCommit = vi
-      .fn()
-      .mockResolvedValueOnce(makeCommit({ message: `Fixes #42, ports https://github.com/other/repo/commit/${linkedSha}` }))
-      .mockResolvedValueOnce(makeCommit({ sha: linkedSha, message: 'Upstream fix for #3' }));
+    const getIssueOrPullRequest = vi.fn(async (owner: string, repo: string, number: number) => makeIssue({ owner, repo, number }));
+    const gh = makeClient({
+      commits: [makeCommit({ message: `Fixes #42, ports https://github.com/other/repo/commit/${linkedSha}` })],
+      commit: vi.fn().mockResolvedValue(makeCommit({ sha: linkedSha, message: 'Upstream fix for #3' })),
+      issue: getIssueOrPullRequest,
+    });
 
-    const context = await buildReleaseContext(makeConfig({ maxReferenceDepth: 1 }), makeClient({ commit: getCommit }));
+    const context = await build(gh);
 
     expect(context.commits[0]?.references).toEqual({ issues: [42], pulls: [], commits: [`other/repo@${linkedSha}`] });
     // "#3" in other/repo's commit means other/repo#3, not issue 3 of the release repository.
@@ -173,61 +209,41 @@ describe('buildReleaseContext', () => {
       pulls: [],
       commits: [],
     });
+    expect(getIssueOrPullRequest).toHaveBeenCalledWith('other', 'repo', 3);
   });
 
-  it('truncates commit messages and linked item fields to max-item-length with an ellipsis', async () => {
+  it('cuts commit messages and linked item fields at 5,000 characters with an ellipsis', async () => {
+    const long = 'x'.repeat(6000);
+    const exact = 'y'.repeat(5000);
     const gh = makeClient({
-      commit: makeCommit({ message: 'Fixes #42 with a commit message that is long' }),
-      issue: makeIssue({
-        title: 'This title is much longer than twenty characters',
-        body: 'This body should remain present and be truncated by the same limit.',
-      }),
+      commits: [makeCommit({ message: `Fixes #42 ${long}` })],
+      issue: makeIssue({ title: long, body: exact }),
     });
 
-    const context = await buildReleaseContext(makeConfig({ maxItemLength: 20 }), gh);
+    const context = await build(gh);
 
-    expect(context.commits[0]?.message).toBe('Fixes #42 with a...');
-    expect(context.linkedItems[0]).toMatchObject({
-      title: 'This title is muc...',
-      body: 'This body should...',
-    });
+    expect(context.commits[0]?.message).toBe(`Fixes #42 ${'x'.repeat(4987)}...`);
+    expect(context.linkedItems[0]?.title).toBe(`${'x'.repeat(4997)}...`);
+    expect(context.linkedItems[0]?.body).toBe(exact);
   });
 
-  it('does not truncate when max-item-length is 0', async () => {
-    const body = 'x'.repeat(10000);
-    const gh = makeClient({ issue: makeIssue({ body }) });
-
-    const context = await buildReleaseContext(makeConfig({ maxItemLength: 0 }), gh);
-
-    expect(context.linkedItems[0]?.body).toBe(body);
-  });
-
-  it('applies max-linked-items per commit instead of globally', async () => {
-    const getIssueOrPullRequest = vi.fn().mockImplementation(async (_owner: string, _repo: string, number: number) =>
-      number === 40
-        ? makeIssue({ number: 40, title: 'First linked item', body: 'Body for #40', url: 'https://github.com/acme/widgets/pull/40', type: 'pull' })
-        : makeIssue({ number: 57, title: 'Second linked item', body: 'Body for #57', url: 'https://github.com/acme/widgets/pull/57', type: 'pull' })
-    );
-
+  it('links at most 5 items for each commit, not for the release as a whole', async () => {
+    const getIssueOrPullRequest = vi.fn(async (_owner: string, _repo: string, number: number) => makeIssue({ number }));
     const gh = makeClient({
-      compare: {
-        commits: [makeCommit({ sha: 'head5678', message: 'Follow-up change (#57)', url: 'https://github.com/acme/widgets/commit/head5678', date: '2024-01-02T00:00:00Z' })],
-        status: 'ahead',
-        totalCommits: 1,
-      },
-      commit: makeCommit({ sha: 'base1234', message: 'Initial change (#40)', url: 'https://github.com/acme/widgets/commit/base1234' }),
+      commits: [
+        makeCommit({ sha: 'a1b2c3d4e5f6', message: 'Fixes #1, #2, #3, #4, #5 and #6' }),
+        makeCommit({ sha: 'b2c3d4e5f6a7', message: 'Fixes #7' }),
+      ],
       issue: getIssueOrPullRequest,
     });
 
-    const context = await buildReleaseContext(makeConfig({ baseCommit: 'base1234', headCommit: 'head5678', maxLinkedItems: 1 }), gh);
-    const linkedIds = context.linkedItems.map(item => item.id);
+    const context = await build(gh);
 
-    expect(linkedIds).toContain('40');
-    expect(linkedIds).toContain('57');
-    expect(getIssueOrPullRequest).toHaveBeenCalledTimes(2);
+    expect(context.linkedItems.map(item => item.id)).toEqual(['1', '2', '3', '4', '5', '7']);
+    expect(getIssueOrPullRequest).not.toHaveBeenCalledWith('acme', 'widgets', 6);
   });
 
-  it('follows references inside linked items up to max-reference-depth', async () => {
+  it('follows references inside linked items 2 levels deep', async () => {
     const getIssueOrPullRequest = issuesByNumber({
       42: makeIssue({ number: 42, body: 'Duplicate of #43' }),
       43: makeIssue({ number: 43, body: 'Root cause tracked in #44' }),
@@ -235,64 +251,21 @@ describe('buildReleaseContext', () => {
     });
     const gh = makeClient({ issue: getIssueOrPullRequest });
 
-    const context = await buildReleaseContext(makeConfig({ maxReferenceDepth: 2 }), gh);
+    const context = await build(gh);
 
     expect(context.linkedItems.map(item => item.id)).toEqual(['42', '43']);
     expect(context.linkedItems[1]).toMatchObject({ referencedBy: ['issue:#42'], references: { issues: [44] } });
     expect(getIssueOrPullRequest).not.toHaveBeenCalledWith('acme', 'widgets', 44);
   });
 
-  it('links nothing when max-reference-depth is 0 but still reports the commit references', async () => {
-    const getIssueOrPullRequest = vi.fn();
-    const gh = makeClient({ issue: getIssueOrPullRequest });
-
-    const context = await buildReleaseContext(makeConfig({ maxReferenceDepth: 0 }), gh);
-
-    expect(context.linkedItems).toEqual([]);
-    expect(context.commits[0]?.references.issues).toEqual([42]);
-    expect(getIssueOrPullRequest).not.toHaveBeenCalled();
-  });
-
-  it('stops linking items for a commit once max-linked-items is reached', async () => {
-    const getIssueOrPullRequest = issuesByNumber({
-      1: makeIssue({ number: 1 }),
-      2: makeIssue({ number: 2 }),
-      3: makeIssue({ number: 3 }),
-    });
-    const gh = makeClient({ commit: makeCommit({ message: 'Fixes #1, #2 and #3' }), issue: getIssueOrPullRequest });
-
-    const context = await buildReleaseContext(makeConfig({ maxLinkedItems: 2 }), gh);
-
-    expect(context.linkedItems.map(item => item.id)).toEqual(['1', '2']);
-    expect(getIssueOrPullRequest).toHaveBeenCalledTimes(2);
-  });
-
-  it('treats max-linked-items 0 as no limit', async () => {
-    const getIssueOrPullRequest = issuesByNumber({
-      1: makeIssue({ number: 1 }),
-      2: makeIssue({ number: 2 }),
-      3: makeIssue({ number: 3 }),
-    });
-    const gh = makeClient({ commit: makeCommit({ message: 'Fixes #1, #2 and #3' }), issue: getIssueOrPullRequest });
-
-    const context = await buildReleaseContext(makeConfig({ maxLinkedItems: 0 }), gh);
-
-    expect(context.linkedItems.map(item => item.id)).toEqual(['1', '2', '3']);
-  });
-
   it('fetches an item referenced by several commits once and records every referrer', async () => {
     const getIssueOrPullRequest = vi.fn().mockResolvedValue(makeIssue());
     const gh = makeClient({
-      compare: {
-        commits: [makeCommit({ sha: 'b2c3d4e5f6a7', message: 'Follow-up for #42' })],
-        status: 'ahead',
-        totalCommits: 1,
-      },
-      commit: makeCommit({ sha: 'a1b2c3d4e5f6', message: 'Fixes #42' }),
+      commits: [makeCommit({ sha: 'a1b2c3d4e5f6', message: 'Fixes #42' }), makeCommit({ sha: 'b2c3d4e5f6a7', message: 'Follow-up for #42' })],
       issue: getIssueOrPullRequest,
     });
 
-    const context = await buildReleaseContext(makeConfig({ baseCommit: 'a1b2c3d4', headCommit: 'b2c3d4e5' }), gh);
+    const context = await build(gh);
 
     expect(getIssueOrPullRequest).toHaveBeenCalledTimes(1);
     expect(context.linkedItems).toHaveLength(1);
@@ -305,16 +278,14 @@ describe('buildReleaseContext', () => {
       makeIssue({ number: 57, url: 'https://github.com/acme/widgets/pull/57', type: 'pull' })
     );
     const gh = makeClient({
-      compare: {
-        commits: [makeCommit({ sha: 'b2c3d4e5f6a7', message: 'Follow up on #57' })],
-        status: 'ahead',
-        totalCommits: 1,
-      },
-      commit: makeCommit({ sha: 'a1b2c3d4e5f6', message: 'Ship the new inputs (#57)' }),
+      commits: [
+        makeCommit({ sha: 'a1b2c3d4e5f6', message: 'Ship the new inputs (#57)' }),
+        makeCommit({ sha: 'b2c3d4e5f6a7', message: 'Follow up on #57' }),
+      ],
       issue: getIssueOrPullRequest,
     });
 
-    const context = await buildReleaseContext(makeConfig({ baseCommit: 'a1b2c3d4', headCommit: 'b2c3d4e5' }), gh);
+    const context = await build(gh);
 
     expect(context.linkedItems).toHaveLength(1);
     expect(context.linkedItems[0]).toMatchObject({ type: 'pull', id: '57', referencedBy: ['commit:a1b2c3d', 'commit:b2c3d4e'] });
@@ -323,12 +294,12 @@ describe('buildReleaseContext', () => {
   it('keeps building the context when a reference cannot be resolved', async () => {
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
     const gh = makeClient({
-      commit: makeCommit({ message: 'Fixes #404 and #42' }),
+      commits: [makeCommit({ message: 'Fixes #404 and #42' })],
       issue: issuesByNumber({ 42: makeIssue() }),
     });
 
     try {
-      const context = await buildReleaseContext(makeConfig(), gh);
+      const context = await build(gh);
 
       expect(context.linkedItems.map(item => item.id)).toEqual(['42']);
       expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('issue:acme/widgets#404'));
@@ -342,11 +313,11 @@ describe('buildReleaseContext', () => {
       42: makeIssue({ body: 'Real body<!-- PR template: link #7 here -->' }),
     });
     const gh = makeClient({
-      commit: makeCommit({ message: 'Fixes #42<!-- closes #99 -->' }),
+      commits: [makeCommit({ message: 'Fixes #42<!-- closes #99 -->' })],
       issue: getIssueOrPullRequest,
     });
 
-    const context = await buildReleaseContext(makeConfig(), gh);
+    const context = await build(gh);
 
     expect(context.commits[0]?.message).toBe('Fixes #42');
     expect(context.commits[0]?.references.issues).toEqual([42]);
@@ -355,23 +326,22 @@ describe('buildReleaseContext', () => {
     expect(getIssueOrPullRequest).toHaveBeenCalledTimes(1);
   });
 
-  it('resolves a short SHA of a commit already in the range without fetching it again', async () => {
-    const baseSha = 'aaaabbbbccccddddeeeeffff0000111122223333';
-    const getCommit = vi.fn().mockResolvedValue(makeCommit({ sha: baseSha, message: 'Add caching' }));
+  it('resolves a short SHA of a commit already in the range without fetching it', async () => {
+    const earlierSha = 'aaaabbbbccccddddeeeeffff0000111122223333';
+    const getCommit = vi.fn();
     const gh = makeClient({
-      compare: {
-        commits: [makeCommit({ sha: 'ffffeeeeddddccccbbbbaaaa9999888877776666', message: 'Revert aaaabbb' })],
-        status: 'ahead',
-        totalCommits: 1,
-      },
+      commits: [
+        makeCommit({ sha: earlierSha, message: 'Add caching' }),
+        makeCommit({ sha: 'ffffeeeeddddccccbbbbaaaa9999888877776666', message: 'Revert aaaabbb' }),
+      ],
       commit: getCommit,
     });
 
-    const context = await buildReleaseContext(makeConfig({ baseCommit: 'aaaabbb', headCommit: 'ffffeee' }), gh);
+    const context = await build(gh);
 
-    expect(getCommit).toHaveBeenCalledTimes(1); // the base commit only
+    expect(getCommit).not.toHaveBeenCalled();
     expect(context.linkedItems).toEqual([]);
-    expect(context.commits[1]?.references.commits).toEqual([baseSha]);
+    expect(context.commits[1]?.references.commits).toEqual([earlierSha]);
   });
 
   function makeRangeCommits(count: number) {
@@ -381,46 +351,32 @@ describe('buildReleaseContext', () => {
   }
 
   it('builds the context for a complete range of more than 250 commits', async () => {
-    const gh = makeClient({
-      compare: { commits: makeRangeCommits(348), status: 'ahead', totalCommits: 348, filesTruncated: false },
-      commit: makeCommit({ sha: 'base1full', message: 'Base commit' }),
-    });
+    const gh = makeClient({ commits: makeRangeCommits(348) });
 
-    const context = await buildReleaseContext(makeConfig({ baseCommit: 'base1', headCommit: 'head1', maxLinkedItems: 0 }), gh);
+    const context = await build(gh);
 
-    expect(context.range.totalCommits).toBe(349); // base + 348 range commits
-    expect(context.commits).toHaveLength(349);
+    expect(context.range.totalCommits).toBe(348);
+    expect(context.commits).toHaveLength(348);
   });
 
   it('throws instead of producing notes when the commit range is incomplete', async () => {
     // Compare reported 300 commits in the range but returned only 250 of them.
-    const gh = makeClient({
-      compare: { commits: makeRangeCommits(250), status: 'ahead', totalCommits: 300, filesTruncated: false },
-      commit: makeCommit({ sha: 'base1full', message: 'Base commit' }),
-    });
+    const gh = makeClient({ commits: makeRangeCommits(250), compare: { totalCommits: 300 } });
 
-    await expect(buildReleaseContext(makeConfig({ baseCommit: 'base1', headCommit: 'head1', maxLinkedItems: 0 }), gh)).rejects.toThrow(
-      'Commit range base1..head1 is incomplete: got 251 of 301 commit(s).'
-    );
+    await expect(build(gh)).rejects.toThrow('Commit range v1.0.0...v1.1.0 is incomplete: got 250 of 300 commit(s).');
   });
 
   it('does not throw on a capped changed-file list (files are non-fatal)', async () => {
     const gh = makeClient({
-      compare: {
-        commits: [makeCommit({ sha: 'c1', message: 'Change one', url: '' })],
-        status: 'ahead',
-        totalCommits: 1,
-        files: ['a.ts', 'b.ts'],
-        filesTruncated: true,
-      },
-      commit: makeCommit({ sha: 'base1full', message: 'Base commit' }),
+      commits: [makeCommit({ sha: 'c1', message: 'Change one', url: '' })],
+      compare: { files: ['a.ts', 'b.ts'], filesTruncated: true },
     });
 
     vi.mocked(core.warning).mockClear();
 
     // The commit range is complete, so a capped file list must not abort the run.
-    const context = await buildReleaseContext(makeConfig({ baseCommit: 'base1', headCommit: 'head1', maxLinkedItems: 0 }), gh);
-    expect(context.range.totalCommits).toBe(2); // base + 1 range commit
+    const context = await build(gh);
+    expect(context.range.totalCommits).toBe(1);
     expect(context.range.changedFiles).toEqual(['a.ts', 'b.ts']);
     // The truncation must surface as a warning (captured by the mock, not leaked to stdout).
     expect(core.warning).toHaveBeenCalledWith(expect.stringMatching(/300-file compare cap/));
@@ -429,17 +385,11 @@ describe('buildReleaseContext', () => {
 
 describe('releaseInputs', () => {
   it('echoes the inputs with the resolved model ID, but not the token or the model API key', () => {
-    const inputs = releaseInputs(makeConfig());
+    const inputs = releaseInputs(CONFIG);
 
     expect(inputs).toEqual({
-      baseCommit: 'a1b2c3d4',
-      headCommit: 'a1b2c3d4',
-      branch: 'main',
       promptUrl: 'https://example.com/prompt.txt',
       model: 'gemini-3.5-flash-lite',
-      maxLinkedItems: 3,
-      maxReferenceDepth: 2,
-      maxItemLength: 5000,
     });
     expect(JSON.stringify(inputs)).not.toContain('gemini-key');
   });

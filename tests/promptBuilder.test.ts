@@ -9,18 +9,10 @@ const HINT = 'Check prompt-url, or leave it blank to use the bundled prompt.';
 describe('buildPrompt', () => {
   const context: ReleaseContext = {
     generatedAt: '2024-01-01T00:00:00.000Z',
-    inputs: {
-      baseCommit: 'a1b2c3d',
-      headCommit: 'd4e5f6g',
-      branch: 'main',
-      promptUrl: '',
-      model: 'gemini-3.5-flash-lite',
-      maxLinkedItems: 3,
-      maxReferenceDepth: 2,
-      maxItemLength: 5000,
-    },
+    inputs: { promptUrl: '', model: 'gemini-3.5-flash-lite' },
     repository: { owner: 'acme', repo: 'widgets', branch: 'main' },
-    range: { base: 'a1b2c3d', head: 'd4e5f6g', totalCommits: 1, changedFiles: [] },
+    release: { tag: 'v1.1.0', previousTag: 'v1.0.0', name: 'Widgets 1.1', prerelease: false },
+    range: { base: 'v1.0.0', head: 'v1.1.0', totalCommits: 1, changedFiles: [] },
     commits: [],
     linkedItems: [
       {

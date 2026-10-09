@@ -1,24 +1,12 @@
 name: Nuntia (Release Notes)
 
 on:
+  release:
+    types: [published]
   workflow_dispatch:
     inputs:
-      base-commit:
-        description: "Start commit SHA"
-        required: true
-      head-commit:
-        description: "End commit SHA"
-        required: true
-      branch:
-        description: "Branch name"
-        required: true
-        default: "main"
       prompt-url:
         description: "Raw prompt URL to try (blank uses the bundled prompt)"
-        required: false
-        default: ""
-      model:
-        description: "Model (blank uses the default for the API key)"
         required: false
         default: ""
 
@@ -30,21 +18,9 @@ jobs:
       issues: read
       pull-requests: read
     steps:
-      - name: Generate release notes
-        id: nuntia
-        uses: danielchalmers/Nuntia@main
+      - uses: danielchalmers/Nuntia@main
         with:
-          base-commit: ${{ inputs.base-commit }}
-          head-commit: ${{ inputs.head-commit }}
-          branch: ${{ inputs.branch }}
           prompt-url: ${{ inputs.prompt-url }}
-          model: ${{ inputs.model }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-      - name: Upload release notes artifact
-        uses: actions/upload-artifact@v7
-        with:
-          name: nuntia-release-notes-${{ github.run_number }}
-          path: artifacts
-          if-no-files-found: error

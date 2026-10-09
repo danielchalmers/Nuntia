@@ -1,18 +1,44 @@
+import type { ReleaseDetails } from './github';
 import type { Endpoint } from './llm/endpoint';
+
+// The event that started the run.
+export type Trigger = {
+  eventName: string;
+  // The full ref the run is on, such as refs/heads/main or refs/tags/v1.2.0.
+  ref: string;
+  sha: string;
+  // The pull request's branch, set only on pull request events.
+  headRef: string;
+  // The release from a release event's payload.
+  release?: ReleaseDetails;
+};
 
 export type Config = {
   owner: string;
   repo: string;
-  branch: string;
-  baseCommit: string;
-  headCommit: string;
   token: string;
   promptUrl: string;
   model: string;
   endpoint: Endpoint;
-  maxLinkedItems: number;
-  maxReferenceDepth: number;
-  maxItemLength: number;
+  trigger: Trigger;
+};
+
+// The release the notes are for, as the model sees it.
+export type ReleaseInfo = {
+  tag: string;
+  previousTag: string;
+  name: string | null;
+  prerelease: boolean;
+};
+
+// The commits a run covers: those after base, up to and including head.
+export type ReleaseRange = {
+  base: string;
+  head: string;
+  // The branch the release was cut from, or the branch a preview runs on.
+  branch: string;
+  // Null for a preview of the next release.
+  release: ReleaseInfo | null;
 };
 
 export type ReferenceType = 'issue' | 'pull' | 'commit';
@@ -55,19 +81,9 @@ export type LinkedItem = {
   references?: ReferenceSummary;
 };
 
-// The slice of Config echoed back to the caller, in the release context and in the run log.
+// The slice of Config echoed back in the release context.
 // Secrets are deliberately excluded.
-export type ReleaseInputs = Pick<
-  Config,
-  | 'baseCommit'
-  | 'headCommit'
-  | 'branch'
-  | 'promptUrl'
-  | 'model'
-  | 'maxLinkedItems'
-  | 'maxReferenceDepth'
-  | 'maxItemLength'
->;
+export type ReleaseInputs = Pick<Config, 'promptUrl' | 'model'>;
 
 export type ReleaseContext = {
   generatedAt: string;
@@ -77,6 +93,7 @@ export type ReleaseContext = {
     repo: string;
     branch: string;
   };
+  release: ReleaseInfo | null;
   range: {
     base: string;
     head: string;
