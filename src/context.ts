@@ -156,7 +156,7 @@ export function releaseInputs(cfg: Config): ReleaseInputs {
 }
 
 export async function buildReleaseContext(cfg: Config, gh: GitHubClient): Promise<ReleaseContext> {
-  const { commits: compareCommits, status, totalCommits, files, filesTruncated, commitsTruncated } = await gh.compareCommits(
+  const { commits: compareCommits, status, totalCommits, files, filesTruncated } = await gh.compareCommits(
     cfg.baseCommit,
     cfg.headCommit
   );
@@ -241,10 +241,10 @@ export async function buildReleaseContext(cfg: Config, gh: GitHubClient): Promis
   const processedCommits = commitEntries.length;
 
   // A release-notes tool must never publish an incomplete changelog.
-  // GitHub's compare API caps at 250 commits; when the full range can't be verifiably recovered (commitsTruncated reflects whether the >250 recovery actually reached the merge-base), fail instead of generating notes over a partial set.
-  if (commitsTruncated || processedCommits < authoritativeTotal) {
+  // compareCommits pages until it has total_commits, so fewer commits means GitHub returned only part of the range; fail instead of generating notes over a partial set.
+  if (processedCommits < authoritativeTotal) {
     throw new Error(
-      `Commit range ${cfg.baseCommit}..${cfg.headCommit} is incomplete: recovered ${processedCommits} of ${authoritativeTotal} commit(s). GitHub's compare API caps at 250 commits and the full range could not be verifiably recovered (this can happen with non-linear history). Aborting so incomplete release notes are not published.`
+      `Commit range ${cfg.baseCommit}..${cfg.headCommit} is incomplete: got ${processedCommits} of ${authoritativeTotal} commit(s). Aborting so incomplete release notes are not published.`
     );
   }
 

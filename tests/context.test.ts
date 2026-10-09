@@ -374,28 +374,34 @@ describe('buildReleaseContext', () => {
     expect(context.commits[1]?.references.commits).toEqual([baseSha]);
   });
 
-  it('throws instead of producing notes when the commit range is incomplete', async () => {
-    // Simulate a range whose commits could not be fully recovered.
-    const gh = makeClient({
-      compare: { status: 'ahead', totalCommits: 300, filesTruncated: false, commitsTruncated: false },
-      commit: makeCommit({ sha: 'base1full', message: 'Base commit' }),
-    });
-
-    await expect(buildReleaseContext(makeConfig({ baseCommit: 'base1', headCommit: 'head1', maxLinkedItems: 0 }), gh)).rejects.toThrow(/incomplete/i);
-  });
-
-  it('throws when the recovery is unverified even if the counts match', async () => {
-    const rangeCommits = Array.from({ length: 300 }, (_, i) =>
+  function makeRangeCommits(count: number) {
+    return Array.from({ length: count }, (_, i) =>
       makeCommit({ sha: `range${i}`.padEnd(40, '0'), message: `Change ${i}`, url: `https://github.com/acme/widgets/commit/range${i}` })
     );
+  }
 
+  it('builds the context for a complete range of more than 250 commits', async () => {
     const gh = makeClient({
-      compare: { commits: rangeCommits, status: 'ahead', totalCommits: 300, filesTruncated: false, commitsTruncated: true },
+      compare: { commits: makeRangeCommits(348), status: 'ahead', totalCommits: 348, filesTruncated: false },
       commit: makeCommit({ sha: 'base1full', message: 'Base commit' }),
     });
 
-    // base + 300 range commits = 301 == authoritative total, but the client signalled the recovery was unconfirmed, so it must still abort rather than lie.
-    await expect(buildReleaseContext(makeConfig({ baseCommit: 'base1', headCommit: 'head1', maxLinkedItems: 0 }), gh)).rejects.toThrow(/incomplete/i);
+    const context = await buildReleaseContext(makeConfig({ baseCommit: 'base1', headCommit: 'head1', maxLinkedItems: 0 }), gh);
+
+    expect(context.range.totalCommits).toBe(349); // base + 348 range commits
+    expect(context.commits).toHaveLength(349);
+  });
+
+  it('throws instead of producing notes when the commit range is incomplete', async () => {
+    // Compare reported 300 commits in the range but returned only 250 of them.
+    const gh = makeClient({
+      compare: { commits: makeRangeCommits(250), status: 'ahead', totalCommits: 300, filesTruncated: false },
+      commit: makeCommit({ sha: 'base1full', message: 'Base commit' }),
+    });
+
+    await expect(buildReleaseContext(makeConfig({ baseCommit: 'base1', headCommit: 'head1', maxLinkedItems: 0 }), gh)).rejects.toThrow(
+      'Commit range base1..head1 is incomplete: got 251 of 301 commit(s).'
+    );
   });
 
   it('does not throw on a capped changed-file list (files are non-fatal)', async () => {
@@ -406,7 +412,6 @@ describe('buildReleaseContext', () => {
         totalCommits: 1,
         files: ['a.ts', 'b.ts'],
         filesTruncated: true,
-        commitsTruncated: false,
       },
       commit: makeCommit({ sha: 'base1full', message: 'Base commit' }),
     });
