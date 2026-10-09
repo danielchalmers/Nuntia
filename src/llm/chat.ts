@@ -41,6 +41,10 @@ export interface Usage {
 }
 
 export const MODEL_TIMEOUT_MS = 600_000;
+// One limit for a whole call, counting every attempt and the waits between them, since retrying hung requests could otherwise take over 90 minutes.
+export const CALL_DEADLINE_MS = 900_000;
+// How often the log notes a request that is still waiting for a reply.
+export const HEARTBEAT_MS = 60_000;
 const MAX_RETRIES = 2;
 const INITIAL_BACKOFF_MS = 5_000;
 // Worst case per call: 10 + 20 + 40 + 60 + 60 + 60 = 250 seconds of waiting out an overload.
@@ -78,6 +82,12 @@ export function createModelFetch(dispatcherTimeoutMs = 0): Fetch {
   const modelFetch: typeof undiciFetch = (input, init) => undiciFetch(input, { ...init, dispatcher });
   // undici's types come from a different release than Node's built-in fetch types, so TypeScript cannot match them even though the API is the same.
   return modelFetch as Fetch;
+}
+
+// The reasoning a JSON call gets on a host, as the startup log states it. Claude's compatibility layer accepts reasoning_effort but ignores it, and a host outside the built-in ones may or may not honor it.
+export function describeReasoning(host: string): string {
+  if (host === 'api.anthropic.com') return `reasoning: provider default (${host} ignores reasoning_effort)`;
+  return BUILT_IN_HOSTS.has(host) ? 'reasoning: high' : `reasoning: high if ${host} honors reasoning_effort`;
 }
 
 function classify(status: number, body: string, endpoint: Pick<Endpoint, 'host' | 'keyName'>): { kind: FailureKind; hint: string } {
@@ -158,14 +168,23 @@ export class ChatClient {
     this.fetch = fetch;
   }
 
-  protected sleep(ms: number) {
-    return new Promise<void>(resolve => setTimeout(resolve, ms));
+  // Ends early when the call's deadline passes.
+  protected sleep(ms: number, deadline: AbortSignal) {
+    return new Promise<void>(resolve => {
+      const done = () => {
+        clearTimeout(timer);
+        deadline.removeEventListener('abort', done);
+        resolve();
+      };
+      const timer = setTimeout(done, ms);
+      deadline.addEventListener('abort', done);
+    });
   }
 
   // Call the model for a JSON reply. `parse` narrows it, and a reply it rejects by throwing is retried like a malformed one.
   generateJson<T>(request: JsonRequest, parse: (data: unknown) => T): Promise<{ data: T } & Usage> {
-    return this.withRetries(async () => {
-      const { text, usage } = await this.complete(() => this.jsonBody(request));
+    return this.withRetries(async deadline => {
+      const { text, usage } = await this.complete(() => this.jsonBody(request), deadline);
       let data: unknown;
       try {
         data = JSON.parse(text.replace(/^```\w*\n([\s\S]*?)\n?```$/, '$1'));
@@ -178,7 +197,7 @@ export class ChatClient {
 
   // Call the model for a plain text reply, at its default reasoning settings.
   generateText(request: ChatRequest): Promise<{ text: string } & Usage> {
-    return this.withRetries(() => this.complete(() => this.textBody(request)).then(({ text, usage }) => ({ text, ...usage })));
+    return this.withRetries(deadline => this.complete(() => this.textBody(request), deadline).then(({ text, usage }) => ({ text, ...usage })));
   }
 
   private textBody(request: ChatRequest): Record<string, unknown> {
@@ -203,12 +222,12 @@ export class ChatClient {
   }
 
   // Sends the request again at once without any optional parameter the host rejects. Each is dropped only once, so this always ends.
-  private async complete(build: () => Record<string, unknown>): Promise<{ text: string; usage: Usage }> {
+  private async complete(build: () => Record<string, unknown>, deadline: AbortSignal): Promise<{ text: string; usage: Usage }> {
     for (;;) {
       const body = build();
       let response: unknown;
       try {
-        response = await this.post(body);
+        response = await this.post(body, deadline);
       } catch (err) {
         const rejected = err instanceof ModelError && err.kind === 'permanent' ? rejectedParameter(err.message, body) : undefined;
         if (!rejected) throw err;
@@ -220,11 +239,14 @@ export class ChatClient {
     }
   }
 
-  private async post(body: Record<string, unknown>): Promise<unknown> {
+  private async post(body: Record<string, unknown>, deadline: AbortSignal): Promise<unknown> {
     const { baseUrl, host, apiKey } = this.endpoint;
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), MODEL_TIMEOUT_MS);
     timer.unref();
+    let beats = 0;
+    const heartbeat = setInterval(() => console.log(`Still waiting for ${host} after ${++beats * HEARTBEAT_MS / 60_000} min...`), HEARTBEAT_MS);
+    heartbeat.unref();
     try {
       const response = await this.fetch(`${baseUrl}/chat/completions`, {
         method: 'POST',
@@ -232,7 +254,7 @@ export class ChatClient {
         body: JSON.stringify(body),
         // Redirects are refused, so the key and the prompt can't be sent on to a host the user didn't pick.
         redirect: 'manual',
-        signal: controller.signal,
+        signal: AbortSignal.any([controller.signal, deadline]),
       });
       if (response.status >= 300 && response.status < 400) {
         await response.body?.cancel();
@@ -251,29 +273,50 @@ export class ChatClient {
       throw err;
     } finally {
       clearTimeout(timer);
+      clearInterval(heartbeat);
     }
   }
 
-  // Anything other than a ModelError, such as a network failure or a reply `parse` rejected, is retryable.
-  private async withRetries<T>(attempt: () => Promise<T>): Promise<T> {
+  /**
+   * Anything other than a ModelError, such as a network failure or a reply `parse` rejected, is retryable.
+   * Past CALL_DEADLINE_MS the call fails as retryable whatever it was doing, because a later call may well get through.
+   */
+  private async withRetries<T>(attempt: (deadline: AbortSignal) => Promise<T>): Promise<T> {
+    const deadline = new AbortController();
+    const timer = setTimeout(() => deadline.abort(), CALL_DEADLINE_MS);
+    timer.unref();
+    let attempts = 0;
     let failures = 0;
     let capacityFailures = 0;
-    for (;;) {
-      try {
-        return await attempt();
-      } catch (err) {
-        const error = err instanceof ModelError ? err : new ModelError(errorMessage(err));
-        let wait: number;
-        if (error.kind === 'capacity' && ++capacityFailures <= CAPACITY_RETRIES) {
-          wait = Math.min(60_000, Math.max(10_000 * 2 ** (capacityFailures - 1), error.retryAfterMs));
-        } else if (error.kind === 'retryable' && ++failures <= MAX_RETRIES) {
-          wait = INITIAL_BACKOFF_MS * 2 ** (failures - 1);
-        } else {
-          throw error;
+    let lastError: ModelError | undefined;
+    const expired = () => {
+      const last = lastError ? ` The last failure was: ${lastError.message}` : '';
+      return new ModelError(`${this.endpoint.host} gave no usable reply within the ${CALL_DEADLINE_MS / 60_000}-minute limit for a call, after ${attempts} attempt${attempts === 1 ? '' : 's'}.${last}`);
+    };
+    try {
+      for (;;) {
+        try {
+          attempts++;
+          return await attempt(deadline.signal);
+        } catch (err) {
+          if (deadline.signal.aborted) throw expired();
+          const error = err instanceof ModelError ? err : new ModelError(errorMessage(err));
+          let wait: number;
+          if (error.kind === 'capacity' && ++capacityFailures <= CAPACITY_RETRIES) {
+            wait = Math.min(60_000, Math.max(10_000 * 2 ** (capacityFailures - 1), error.retryAfterMs));
+          } else if (error.kind === 'retryable' && ++failures <= MAX_RETRIES) {
+            wait = INITIAL_BACKOFF_MS * 2 ** (failures - 1);
+          } else {
+            throw error;
+          }
+          lastError = error;
+          console.warn(`Model call failed (${error.kind}); retrying in ${wait / 1000}s: ${error.message}`);
+          await this.sleep(wait, deadline.signal);
+          if (deadline.signal.aborted) throw expired();
         }
-        console.warn(`Model call failed (${error.kind}); retrying in ${wait / 1000}s: ${error.message}`);
-        await this.sleep(wait);
       }
+    } finally {
+      clearTimeout(timer);
     }
   }
 }

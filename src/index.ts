@@ -8,7 +8,7 @@ import { buildPrompt, loadPrompt } from './prompt';
 import { writeToRelease } from './publish';
 import { resolveRange } from './release';
 import { sanitizeNotes } from './sanitize';
-import { ChatClient } from './llm/chat';
+import { ChatClient, ModelError, type Usage } from './llm/chat';
 import { describeEndpoint } from './llm/endpoint';
 
 /** Write a file to the artifacts directory under the working directory. */
@@ -50,8 +50,21 @@ async function run(): Promise<void> {
   writeArtifact('nuntia-context.json', JSON.stringify(context, null, 2));
 
   console.log(`Generating release notes...`);
-  const { text, inputTokens, outputTokens } = await client.generateText(request);
-  console.log(`Used ${inputTokens} input tokens, ${outputTokens} output tokens.`);
+  const started = Date.now();
+  let reply: { text: string } & Usage;
+  try {
+    reply = await client.generateText(request);
+  } catch (err) {
+    // Of the provider's failures, only a rejected key, an unknown model or a billing problem fails the run.
+    // An outage, a timeout or a bad reply is the provider's problem, and a red run would notify the maintainer about it.
+    if (!(err instanceof ModelError) || err.kind === 'fatal') throw err;
+    const message = `No release notes were written: ${err.message}`;
+    core.warning(message);
+    if (process.env.GITHUB_STEP_SUMMARY) await core.summary.addRaw(`${message}\n`).write();
+    return;
+  }
+  const { text, inputTokens, outputTokens } = reply;
+  console.log(`Generated in ${((Date.now() - started) / 1000).toFixed(1)}s, using ${inputTokens} input tokens and ${outputTokens} output tokens.`);
 
   // A preview is cleaned the same way, so it shows what a release would get.
   const notes = sanitizeNotes(text, cfg.owner, cfg.repo).trimEnd();
