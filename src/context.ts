@@ -1,5 +1,5 @@
 import * as core from '@actions/core';
-import type { CommitInfo, Config, LinkedItem, Reference, ReferenceSummary, ReferenceType, ReleaseContext, ReleaseInputs, ReleaseRange } from './types';
+import type { CommitInfo, Config, LinkedItem, Reference, ReferenceSummary, ReferenceType, ReleaseContext, ReleaseRange } from './types';
 import { extractReferences, referenceKey, summarizeReferences } from './references';
 import type { CommitDetails, IssueOrPullDetails } from './github';
 import { GitHubClient } from './github';
@@ -19,6 +19,14 @@ const MAX_LINKED_ITEMS = 5;
 const MAX_REFERENCE_DEPTH = 2;
 // The longest a commit message or a linked item's title or body may be.
 const MAX_ITEM_LENGTH = 5000;
+// How many GitHub API calls a run may make, the release and compare reads included, before it stops following references.
+// GITHUB_TOKEN allows 1,000 requests an hour per repository, and the release's other workflows share them.
+const MAX_API_CALLS = 300;
+// A context estimated at more tokens than this, at 4 characters a token, is trimmed until it fits.
+const MAX_CONTEXT_TOKENS = 150_000;
+const CHARS_PER_TOKEN = 4;
+// The shorter lengths linked item bodies are cut at in turn, once nothing else is left to trim.
+const SHORTER_BODY_LENGTHS = [2500, 1000, 500];
 
 function getErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
@@ -46,8 +54,6 @@ function toCommitInfo(commit: CommitDetails, references: ReferenceSummary, messa
     sha: commit.sha,
     message,
     url: commit.url,
-    author: commit.author,
-    date: commit.date,
     references,
   };
 }
@@ -147,18 +153,60 @@ function normalizeCommitReference(ref: Reference, knownCommits: Set<string>): Re
   return { ...ref, id: normalized };
 }
 
-function truncateText(text: string): string {
-  if (text.length <= MAX_ITEM_LENGTH) return text;
-  return `${text.slice(0, MAX_ITEM_LENGTH - 3).trimEnd()}...`;
+function truncateText(text: string, maxLength = MAX_ITEM_LENGTH): string {
+  if (text.length <= maxLength) return text;
+  return `${text.slice(0, maxLength - 3).trimEnd()}...`;
+}
+
+// The model receives the context as compact JSON, so that is what gets measured.
+function estimateTokens(context: ReleaseContext): number {
+  return Math.ceil(JSON.stringify(context).length / CHARS_PER_TOKEN);
+}
+
+function formatTokens(tokens: number): string {
+  return `about ${Math.round(tokens / 1000)}k tokens`;
 }
 
 /**
- * Echo back the non-secret inputs the run was resolved to.
- * Field order is significant: it drives the JSON key order in the release context.
+ * Trim a context that is over MAX_CONTEXT_TOKENS, stopping as soon as it fits.
+ * It drops the linked items found through other linked items, then the changed-file list, and then cuts linked item bodies shorter.
  */
-export function releaseInputs(cfg: Config): ReleaseInputs {
-  const { promptUrl, model } = cfg;
-  return { promptUrl, model };
+function trimContext(context: ReleaseContext, deepItems: ReadonlySet<LinkedItem>): void {
+  let tokens = estimateTokens(context);
+  if (tokens <= MAX_CONTEXT_TOKENS) return;
+  console.log(`The release context is ${formatTokens(tokens)}, over the limit of ${formatTokens(MAX_CONTEXT_TOKENS)}, so it will be trimmed.`);
+
+  const directItems = context.linkedItems.filter(item => !deepItems.has(item));
+  if (directItems.length < context.linkedItems.length) {
+    const dropped = context.linkedItems.length - directItems.length;
+    context.linkedItems = directItems;
+    tokens = estimateTokens(context);
+    console.log(`Dropped ${dropped} linked item(s) found through other linked items, leaving ${formatTokens(tokens)}.`);
+    if (tokens <= MAX_CONTEXT_TOKENS) return;
+  }
+
+  if (context.range.changedFiles?.length) {
+    delete context.range.changedFiles;
+    tokens = estimateTokens(context);
+    console.log(`Dropped the changed-file list, leaving ${formatTokens(tokens)}.`);
+    if (tokens <= MAX_CONTEXT_TOKENS) return;
+  }
+
+  for (const maxLength of SHORTER_BODY_LENGTHS) {
+    let cut = 0;
+    for (const item of context.linkedItems) {
+      if (typeof item.body === 'string' && item.body.length > maxLength) {
+        item.body = truncateText(item.body, maxLength);
+        cut++;
+      }
+    }
+    if (cut === 0) continue;
+    tokens = estimateTokens(context);
+    console.log(`Cut the bodies of ${cut} linked item(s) at ${maxLength.toLocaleString('en-US')} characters, leaving ${formatTokens(tokens)}.`);
+    if (tokens <= MAX_CONTEXT_TOKENS) return;
+  }
+
+  core.warning(`The release context is still ${formatTokens(tokens)} after trimming, so the model may not accept it.`);
 }
 
 /** Gather the commits after range.base up to range.head, and the issues, pull requests and commits they reference. */
@@ -185,6 +233,10 @@ export async function buildReleaseContext(cfg: Config, releaseRange: ReleaseRang
 
   const linkedItems = new Map<string, LinkedItem>();
   const linkedItemCountsByRoot = new Map<string, number>();
+  // The linked items found through another linked item, which trimming drops first.
+  const deepItems = new Set<LinkedItem>();
+  // The references left unfetched once the API call budget ran out.
+  const overBudget = new Set<string>();
   let index = 0;
 
   while (index < queue.length) {
@@ -202,6 +254,12 @@ export async function buildReleaseContext(cfg: Config, releaseRange: ReleaseRang
     // A commit already inside the range is context we have, so don't spend a lookup re-fetching it.
     if (normalizedRef.type === 'commit' && knownCommits.has(normalizedRef.id.toLowerCase())) continue;
 
+    // The queue holds every direct reference before any found inside a linked item, so those deeper references are the first left out when the budget runs out.
+    if (gh.getApiCallCount() >= MAX_API_CALLS) {
+      overBudget.add(key);
+      continue;
+    }
+
     try {
       const resolved =
         normalizedRef.type === 'commit'
@@ -216,6 +274,7 @@ export async function buildReleaseContext(cfg: Config, releaseRange: ReleaseRang
       resolved.linked.references = summarizeReferences(refs, cfg.owner, cfg.repo);
       linkedItems.set(resolved.key, resolved.linked);
       linkedItemCountsByRoot.set(item.rootCommitSha, linkedCountForRoot + 1);
+      if (item.depth > 1) deepItems.add(resolved.linked);
 
       if (item.depth < MAX_REFERENCE_DEPTH) {
         for (const ref of refs) {
@@ -225,6 +284,10 @@ export async function buildReleaseContext(cfg: Config, releaseRange: ReleaseRang
     } catch (error) {
       console.warn(`⚠️ Failed to resolve reference ${key}: ${getErrorMessage(error)}`);
     }
+  }
+
+  if (overBudget.size > 0) {
+    console.log(`Stopped following references at ${MAX_API_CALLS} GitHub API calls, leaving out ${overBudget.size} more.`);
   }
 
   // compareCommits pages until it has total_commits, so fewer commits means GitHub returned only part of the range.
@@ -255,17 +318,13 @@ export async function buildReleaseContext(cfg: Config, releaseRange: ReleaseRang
     commitInfo.message = truncateText(commitInfo.message);
   }
 
-  const linkedItemsList: LinkedItem[] = Array.from(linkedItems.values()).map(item => {
-    const trimmed: LinkedItem = { ...item };
-    if (typeof trimmed.message === 'string') trimmed.message = truncateText(trimmed.message);
-    if (typeof trimmed.title === 'string') trimmed.title = truncateText(trimmed.title);
-    if (typeof trimmed.body === 'string') trimmed.body = truncateText(trimmed.body);
-    return trimmed;
-  });
+  for (const item of linkedItems.values()) {
+    if (typeof item.message === 'string') item.message = truncateText(item.message);
+    if (typeof item.title === 'string') item.title = truncateText(item.title);
+    if (typeof item.body === 'string') item.body = truncateText(item.body);
+  }
 
-  return {
-    generatedAt: new Date().toISOString(),
-    inputs: releaseInputs(cfg),
+  const context: ReleaseContext = {
     repository: {
       owner: cfg.owner,
       repo: cfg.repo,
@@ -274,6 +333,8 @@ export async function buildReleaseContext(cfg: Config, releaseRange: ReleaseRang
     release: releaseRange.release,
     range,
     commits: commitEntries,
-    linkedItems: linkedItemsList,
+    linkedItems: Array.from(linkedItems.values()),
   };
+  trimContext(context, deepItems);
+  return context;
 }

@@ -8,8 +8,6 @@ const HINT = 'Check prompt-url, or leave it blank to use the bundled prompt.';
 
 describe('buildPrompt', () => {
   const context: ReleaseContext = {
-    generatedAt: '2024-01-01T00:00:00.000Z',
-    inputs: { promptUrl: '', model: 'gemini-3.5-flash-lite' },
     repository: { owner: 'acme', repo: 'widgets', branch: 'main' },
     release: { tag: 'v1.1.0', previousTag: 'v1.0.0', name: 'Widgets 1.1', prerelease: false },
     range: { base: 'v1.0.0', head: 'v1.1.0', totalCommits: 1, changedFiles: [] },
@@ -33,12 +31,14 @@ describe('buildPrompt', () => {
     expect(systemPrompt).toBe('Test prompt content\n');
   });
 
-  it('sends the complete release context as JSON in the user prompt', () => {
+  it('sends the complete release context as compact JSON in the user prompt', () => {
     const { userPrompt } = buildPrompt(context, 'Test prompt content');
     const header = '=== RELEASE CONTEXT (JSON) ===\n';
 
     expect(userPrompt.startsWith(header)).toBe(true);
     expect(JSON.parse(userPrompt.slice(header.length))).toEqual(context);
+    expect(userPrompt).toBe(`${header}${JSON.stringify(context)}\n`);
+    expect(userPrompt).toContain('"repository":{"owner":"acme"');
   });
 });
 

@@ -61,8 +61,6 @@ export type CommitInfo = {
   sha: string;
   message: string;
   url: string;
-  author: string;
-  date: string;
   references: ReferenceSummary;
 };
 
@@ -81,13 +79,7 @@ export type LinkedItem = {
   references?: ReferenceSummary;
 };
 
-// The slice of Config echoed back in the release context.
-// Secrets are deliberately excluded.
-export type ReleaseInputs = Pick<Config, 'promptUrl' | 'model'>;
-
 export type ReleaseContext = {
-  generatedAt: string;
-  inputs: ReleaseInputs;
   repository: {
     owner: string;
     repo: string;
@@ -99,7 +91,8 @@ export type ReleaseContext = {
     head: string;
     status?: string;
     totalCommits: number;
-    changedFiles: string[];
+    // Left out when the context is trimmed to fit.
+    changedFiles?: string[];
   };
   commits: CommitInfo[];
   linkedItems: LinkedItem[];
