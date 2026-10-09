@@ -28,12 +28,9 @@ jobs:
         run: npm run build
       - name: Verify dist/ is up to date
         run: npm run check:dist
+      # Outside a release, Nuntia previews the next release: the commits after the latest release (or the newest tag) up to this commit.
       - name: Mock release notes
         uses: ./
-        with:
-          base-commit: ${{ github.sha }}
-          head-commit: ${{ github.sha }}
-          branch: ${{ github.ref_name }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}

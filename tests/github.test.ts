@@ -47,11 +47,31 @@ function comparePage(total: number, commits: unknown[], files: unknown[] = []) {
 }
 
 // GitHubClient builds a real octokit in its constructor, so swap in a stub of just the endpoints under test.
-function makeClient(rest: Record<string, unknown>) {
+function makeClient(rest: Record<string, unknown>, graphql?: unknown) {
   const client = new GitHubClient('token', 'acme', 'widgets') as any;
-  client.octokit = { rest };
+  client.octokit = { rest, graphql };
   return client;
 }
+
+function httpError(status: number) {
+  return Object.assign(new Error(`HTTP ${status}`), { status });
+}
+
+const RELEASE_DATA = {
+  tag_name: 'v1.1.0',
+  name: 'Widgets 1.1',
+  body: '**Full Changelog**: https://github.com/acme/widgets/compare/v1.0.0...v1.1.0',
+  prerelease: false,
+  target_commitish: 'main',
+};
+
+const RELEASE_DETAILS = {
+  tag: 'v1.1.0',
+  name: 'Widgets 1.1',
+  body: '**Full Changelog**: https://github.com/acme/widgets/compare/v1.0.0...v1.1.0',
+  prerelease: false,
+  targetCommitish: 'main',
+};
 
 describe('GitHubClient.compareCommits', () => {
   it('paginates compare results to include all commits', async () => {
@@ -252,6 +272,57 @@ describe('GitHubClient.getIssueOrPullRequest', () => {
     const details = await client.getIssueOrPullRequest('acme', 'widgets', 58);
 
     expect(details.state).toBe('closed');
+  });
+});
+
+describe('GitHubClient releases', () => {
+  it("reads a tag's release", async () => {
+    const getReleaseByTag = mockResponses(RELEASE_DATA);
+    const client = makeClient({ repos: { getReleaseByTag } });
+
+    expect(await client.findReleaseByTag('v1.1.0')).toEqual(RELEASE_DETAILS);
+    expect(getReleaseByTag).toHaveBeenCalledWith({ owner: 'acme', repo: 'widgets', tag: 'v1.1.0' });
+  });
+
+  it('reads the latest release', async () => {
+    const getLatestRelease = mockResponses(RELEASE_DATA);
+    const client = makeClient({ repos: { getLatestRelease } });
+
+    expect(await client.findLatestRelease()).toEqual(RELEASE_DETAILS);
+    expect(getLatestRelease).toHaveBeenCalledWith({ owner: 'acme', repo: 'widgets' });
+  });
+
+  it.each([
+    ['findReleaseByTag', 'getReleaseByTag'],
+    ['findLatestRelease', 'getLatestRelease'],
+  ])('%s finds nothing on a 404, and passes on any other failure', async (method, endpoint) => {
+    const notFound = makeClient({ repos: { [endpoint]: vi.fn().mockRejectedValue(httpError(404)) } });
+    const failing = makeClient({ repos: { [endpoint]: vi.fn().mockRejectedValue(httpError(500)) } });
+
+    await expect(notFound[method]('v1.1.0')).resolves.toBeUndefined();
+    await expect(failing[method]('v1.1.0')).rejects.toThrow('HTTP 500');
+  });
+
+  it('asks GraphQL for the tag with the newest commit', async () => {
+    const graphql = vi.fn().mockResolvedValue({ repository: { refs: { nodes: [{ name: 'v0.3.0' }] } } });
+    const client = makeClient({}, graphql);
+
+    expect(await client.findNewestTag()).toBe('v0.3.0');
+    expect(graphql).toHaveBeenCalledWith(expect.stringContaining('orderBy: { field: TAG_COMMIT_DATE, direction: DESC }'), { owner: 'acme', repo: 'widgets' });
+  });
+
+  it('finds no newest tag in a repository without tags', async () => {
+    const client = makeClient({}, vi.fn().mockResolvedValue({ repository: { refs: { nodes: [] } } }));
+
+    expect(await client.findNewestTag()).toBeUndefined();
+  });
+
+  it('returns the body of the release notes GitHub generates for a tag', async () => {
+    const generateReleaseNotes = mockResponses({ name: 'v1.1.0', body: RELEASE_DATA.body });
+    const client = makeClient({ repos: { generateReleaseNotes } });
+
+    expect(await client.generateReleaseNotes('v1.1.0')).toBe(RELEASE_DATA.body);
+    expect(generateReleaseNotes).toHaveBeenCalledWith({ owner: 'acme', repo: 'widgets', tag_name: 'v1.1.0' });
   });
 });
 

@@ -1,5 +1,5 @@
 import * as core from '@actions/core';
-import type { CommitInfo, Config, LinkedItem, Reference, ReferenceSummary, ReferenceType, ReleaseContext, ReleaseInputs } from './types';
+import type { CommitInfo, Config, LinkedItem, Reference, ReferenceSummary, ReferenceType, ReleaseContext, ReleaseInputs, ReleaseRange } from './types';
 import { extractReferences, referenceKey, summarizeReferences } from './references';
 import type { CommitDetails, IssueOrPullDetails } from './github';
 import { GitHubClient } from './github';
@@ -12,6 +12,13 @@ type QueueEntry = {
 };
 
 const MARKDOWN_COMMENT = /<!--[\s\S]*?-->/g;
+
+// How many linked issues, pull requests and commits each commit in the range may pull in.
+const MAX_LINKED_ITEMS = 5;
+// How far references inside linked items are followed, where 1 is an item a commit links directly.
+const MAX_REFERENCE_DEPTH = 2;
+// The longest a commit message or a linked item's title or body may be.
+const MAX_ITEM_LENGTH = 5000;
 
 function getErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
@@ -140,34 +147,24 @@ function normalizeCommitReference(ref: Reference, knownCommits: Set<string>): Re
   return { ...ref, id: normalized };
 }
 
-function truncateText(text: string, maxLength: number): string {
-  if (maxLength <= 0 || text.length <= maxLength) return text;
-  if (maxLength <= 3) return text.slice(0, maxLength);
-  return `${text.slice(0, maxLength - 3).trimEnd()}...`;
+function truncateText(text: string): string {
+  if (text.length <= MAX_ITEM_LENGTH) return text;
+  return `${text.slice(0, MAX_ITEM_LENGTH - 3).trimEnd()}...`;
 }
 
 /**
  * Echo back the non-secret inputs the run was resolved to.
- * Field order is significant: it drives the JSON key order in the release context and the run log.
+ * Field order is significant: it drives the JSON key order in the release context.
  */
 export function releaseInputs(cfg: Config): ReleaseInputs {
-  const { baseCommit, headCommit, branch, promptUrl, model, maxLinkedItems, maxReferenceDepth, maxItemLength } = cfg;
-  return { baseCommit, headCommit, branch, promptUrl, model, maxLinkedItems, maxReferenceDepth, maxItemLength };
+  const { promptUrl, model } = cfg;
+  return { promptUrl, model };
 }
 
-export async function buildReleaseContext(cfg: Config, gh: GitHubClient): Promise<ReleaseContext> {
-  const { commits: compareCommits, status, totalCommits, files, filesTruncated } = await gh.compareCommits(
-    cfg.baseCommit,
-    cfg.headCommit
-  );
-  let commits: CommitDetails[] = [];
-
-  if (cfg.baseCommit === cfg.headCommit) {
-    commits = [await gh.getCommit(cfg.owner, cfg.repo, cfg.baseCommit)];
-  } else {
-    const baseCommit = await gh.getCommit(cfg.owner, cfg.repo, cfg.baseCommit);
-    commits = [baseCommit, ...compareCommits];
-  }
+/** Gather the commits after range.base up to range.head, and the issues, pull requests and commits they reference. */
+export async function buildReleaseContext(cfg: Config, releaseRange: ReleaseRange, gh: GitHubClient): Promise<ReleaseContext> {
+  const { base, head } = releaseRange;
+  const { commits, status, totalCommits, files, filesTruncated } = await gh.compareCommits(base, head);
 
   const knownCommits = new Set(commits.map(commit => commit.sha.toLowerCase()));
   const commitEntries: CommitInfo[] = [];
@@ -193,16 +190,14 @@ export async function buildReleaseContext(cfg: Config, gh: GitHubClient): Promis
   while (index < queue.length) {
     const item = queue[index++];
     if (!item) break;
-    if (item.depth > cfg.maxReferenceDepth) continue;
+    if (item.depth > MAX_REFERENCE_DEPTH) continue;
 
     const normalizedRef = normalizeCommitReference(item.ref, knownCommits);
     const key = referenceKey(normalizedRef);
     if (mergeReferencedBy(linkedItems, key, item.source)) continue;
 
     const linkedCountForRoot = linkedItemCountsByRoot.get(item.rootCommitSha) ?? 0;
-    if (cfg.maxLinkedItems > 0 && linkedCountForRoot >= cfg.maxLinkedItems) {
-      continue;
-    }
+    if (linkedCountForRoot >= MAX_LINKED_ITEMS) continue;
 
     // A commit already inside the range is context we have, so don't spend a lookup re-fetching it.
     if (normalizedRef.type === 'commit' && knownCommits.has(normalizedRef.id.toLowerCase())) continue;
@@ -222,7 +217,7 @@ export async function buildReleaseContext(cfg: Config, gh: GitHubClient): Promis
       linkedItems.set(resolved.key, resolved.linked);
       linkedItemCountsByRoot.set(item.rootCommitSha, linkedCountForRoot + 1);
 
-      if (item.depth < cfg.maxReferenceDepth) {
+      if (item.depth < MAX_REFERENCE_DEPTH) {
         for (const ref of refs) {
           queue.push({ ref, depth: item.depth + 1, source: resolved.sourceLabel, rootCommitSha: item.rootCommitSha });
         }
@@ -232,19 +227,12 @@ export async function buildReleaseContext(cfg: Config, gh: GitHubClient): Promis
     }
   }
 
-  // Authoritative base-inclusive commit count for the range.
-  // compareCommits' total_commits is base-exclusive, so add one for the base commit itself.
-  const authoritativeTotal =
-    cfg.baseCommit === cfg.headCommit
-      ? 1
-      : (typeof totalCommits === 'number' ? totalCommits : compareCommits.length) + 1;
-  const processedCommits = commitEntries.length;
-
-  // A release-notes tool must never publish an incomplete changelog.
-  // compareCommits pages until it has total_commits, so fewer commits means GitHub returned only part of the range; fail instead of generating notes over a partial set.
-  if (processedCommits < authoritativeTotal) {
+  // compareCommits pages until it has total_commits, so fewer commits means GitHub returned only part of the range.
+  // A release-notes tool must never publish an incomplete changelog, so fail instead of generating notes over a partial set.
+  const authoritativeTotal = typeof totalCommits === 'number' ? totalCommits : commits.length;
+  if (commitEntries.length < authoritativeTotal) {
     throw new Error(
-      `Commit range ${cfg.baseCommit}..${cfg.headCommit} is incomplete: got ${processedCommits} of ${authoritativeTotal} commit(s). Aborting so incomplete release notes are not published.`
+      `Commit range ${base}...${head} is incomplete: got ${commitEntries.length} of ${authoritativeTotal} commit(s). Aborting so incomplete release notes are not published.`
     );
   }
 
@@ -256,24 +244,22 @@ export async function buildReleaseContext(cfg: Config, gh: GitHubClient): Promis
   }
 
   const range: ReleaseContext['range'] = {
-    base: cfg.baseCommit,
-    head: cfg.headCommit,
+    base,
+    head,
     totalCommits: authoritativeTotal,
     changedFiles: files,
     ...(status !== undefined && { status }),
   };
 
-  const maxItemLength = cfg.maxItemLength;
-
   for (const commitInfo of commitEntries) {
-    commitInfo.message = truncateText(commitInfo.message, maxItemLength);
+    commitInfo.message = truncateText(commitInfo.message);
   }
 
   const linkedItemsList: LinkedItem[] = Array.from(linkedItems.values()).map(item => {
     const trimmed: LinkedItem = { ...item };
-    if (typeof trimmed.message === 'string') trimmed.message = truncateText(trimmed.message, maxItemLength);
-    if (typeof trimmed.title === 'string') trimmed.title = truncateText(trimmed.title, maxItemLength);
-    if (typeof trimmed.body === 'string') trimmed.body = truncateText(trimmed.body, maxItemLength);
+    if (typeof trimmed.message === 'string') trimmed.message = truncateText(trimmed.message);
+    if (typeof trimmed.title === 'string') trimmed.title = truncateText(trimmed.title);
+    if (typeof trimmed.body === 'string') trimmed.body = truncateText(trimmed.body);
     return trimmed;
   });
 
@@ -283,8 +269,9 @@ export async function buildReleaseContext(cfg: Config, gh: GitHubClient): Promis
     repository: {
       owner: cfg.owner,
       repo: cfg.repo,
-      branch: cfg.branch,
+      branch: releaseRange.branch,
     },
+    release: releaseRange.release,
     range,
     commits: commitEntries,
     linkedItems: linkedItemsList,
