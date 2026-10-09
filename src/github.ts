@@ -6,8 +6,6 @@ export type CommitDetails = {
   sha: string;
   message: string;
   url: string;
-  author: string;
-  date: string;
 };
 
 export type IssueOrPullDetails = {
@@ -86,6 +84,7 @@ export class GitHubClient {
     );
   }
 
+  /** The requests this client has sent so far in the run, which the release context spends as its budget. */
   getApiCallCount(): number {
     return this.apiCallCount;
   }
@@ -95,16 +94,10 @@ export class GitHubClient {
   }
 
   private mapCommit(data: any): CommitDetails {
-    const message = data?.commit?.message || '';
-    const login = data?.author?.login || data?.committer?.login || '';
-    const author = login ? (login.startsWith('@') ? login : `@${login}`) : (data?.commit?.author?.name || data?.commit?.committer?.name || 'unknown');
-    const date = data?.commit?.author?.date || data?.commit?.committer?.date || '';
     return {
       sha: data?.sha || '',
-      message,
+      message: data?.commit?.message || '',
       url: data?.html_url || '',
-      author,
-      date,
     };
   }
 

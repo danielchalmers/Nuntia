@@ -1,6 +1,6 @@
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach, type Mock } from 'vitest';
 import * as core from '@actions/core';
-import { buildReleaseContext, releaseInputs } from '../src/context';
+import { buildReleaseContext } from '../src/context';
 import type { CommitDetails, GitHubClient } from '../src/github';
 import type { Config, ReleaseRange } from '../src/types';
 
@@ -40,8 +40,6 @@ function makeCommit(overrides: Partial<CommitDetails> = {}): CommitDetails {
     sha: 'a1b2c3d4e5f6',
     message: 'Fixes #42',
     url: 'https://github.com/acme/widgets/commit/a1b2c3d4e5f6',
-    author: '@dev',
-    date: '2024-01-01T00:00:00Z',
     ...overrides,
   };
 }
@@ -64,17 +62,21 @@ function makeIssue(overrides: Record<string, unknown> = {}) {
 /**
  * Build a GitHubClient stub whose compare returns `commits` (one "Fixes #42" commit by default) as a complete range.
  * Pass a plain object to have a lookup resolve to it, or a vi.fn() when the test needs to assert on how the lookup was called.
+ * Like the real client it counts every request, starting from `priorApiCalls` for those made before the context is built.
  */
 function makeClient(
-  opts: { commits?: CommitDetails[]; compare?: Record<string, unknown>; commit?: unknown; issue?: unknown } = {}
+  opts: { commits?: CommitDetails[]; compare?: Record<string, unknown>; commit?: unknown; issue?: unknown; priorApiCalls?: number } = {}
 ): GitHubClient {
   const commits = opts.commits ?? [makeCommit()];
-  return {
+  const endpoints = {
     compareCommits: vi.fn().mockResolvedValue({ commits, status: 'ahead', totalCommits: commits.length, files: [], filesTruncated: false, ...opts.compare }),
     getCommit: typeof opts.commit === 'function' ? opts.commit : vi.fn().mockResolvedValue(opts.commit ?? makeCommit()),
     getIssueOrPullRequest:
       typeof opts.issue === 'function' ? opts.issue : vi.fn().mockResolvedValue(opts.issue ?? makeIssue()),
-  } as unknown as GitHubClient;
+  };
+  const getApiCallCount = () =>
+    Object.values(endpoints).reduce((count, endpoint) => count + (endpoint as Mock).mock.calls.length, opts.priorApiCalls ?? 0);
+  return { ...endpoints, getApiCallCount } as unknown as GitHubClient;
 }
 
 // Resolves issue/PR lookups from a table keyed by number, rejecting unknown numbers like a 404 would.
@@ -115,6 +117,13 @@ describe('buildReleaseContext', () => {
     expect(context.release).toBeNull();
     expect(context.repository.branch).toBe('dev');
     expect(context.range).toMatchObject({ base: 'v1.1.0', head: 'run-sha' });
+  });
+
+  it('leaves out the generation time, the inputs, and commit authors and dates', async () => {
+    const context = await build(makeClient());
+
+    expect(Object.keys(context)).toEqual(['repository', 'release', 'range', 'commits', 'linkedItems']);
+    expect(Object.keys(context.commits[0]!)).toEqual(['sha', 'message', 'url', 'references']);
   });
 
   it('builds an empty context when there are no commits after the base', async () => {
@@ -383,14 +392,142 @@ describe('buildReleaseContext', () => {
   });
 });
 
-describe('releaseInputs', () => {
-  it('echoes the inputs with the resolved model ID, but not the token or the model API key', () => {
-    const inputs = releaseInputs(CONFIG);
+describe('buildReleaseContext limits', () => {
+  // 150k tokens at 4 characters a token.
+  const MAX_CONTEXT_CHARS = 600_000;
 
-    expect(inputs).toEqual({
-      promptUrl: 'https://example.com/prompt.txt',
-      model: 'gemini-3.5-flash-lite',
+  function range(from: number, count: number) {
+    return Array.from({ length: count }, (_, i) => from + i);
+  }
+
+  // A distinct SHA whose first 7 characters, which label it as a referrer, are the zero-padded number.
+  function shaFor(number: number) {
+    return String(number).padStart(7, '0').padEnd(40, 'a');
+  }
+
+  // A commit that fixes the given issues, with a SHA made from the first one.
+  function commitFixing(numbers: number[]) {
+    return makeCommit({ sha: shaFor(numbers[0]!), message: `Fixes ${numbers.map(n => `#${n}`).join(', ')}`, url: '' });
+  }
+
+  function issueLookup(issueFor: (number: number) => Partial<ReturnType<typeof makeIssue>>) {
+    return vi.fn(async (_owner: string, _repo: string, number: number) => makeIssue({ number, title: `Issue ${number}`, ...issueFor(number) }));
+  }
+
+  function logLines() {
+    return vi.mocked(console.log).mock.calls.map(args => args.join(' '));
+  }
+
+  beforeEach(() => {
+    vi.spyOn(console, 'log').mockImplementation(() => {});
+    vi.mocked(core.warning).mockClear();
+  });
+
+  afterEach(() => {
+    vi.mocked(console.log).mockRestore();
+  });
+
+  it('stops fetching linked items at 300 GitHub API calls in the run, leaving out references inside linked items first', async () => {
+    const getIssueOrPullRequest = issueLookup(number => ({ body: number === 1 ? 'Root cause tracked in #10' : 'Fixed.' }));
+    const gh = makeClient({
+      // Reading the release made 297 calls and the compare makes the 298th, which leaves room for two lookups.
+      priorApiCalls: 297,
+      commits: [commitFixing([1]), commitFixing([2]), commitFixing([3]), makeCommit({ sha: 'd'.repeat(40), message: 'Follow-up for #1' })],
+      issue: getIssueOrPullRequest,
     });
-    expect(JSON.stringify(inputs)).not.toContain('gemini-key');
+
+    const context = await build(gh);
+
+    expect(getIssueOrPullRequest).toHaveBeenCalledTimes(2);
+    expect(context.linkedItems.map(item => item.id)).toEqual(['1', '2']);
+    // An item fetched before the budget ran out still records the referrers that come after.
+    expect(context.linkedItems[0]?.referencedBy).toEqual(['commit:0000001', 'commit:ddddddd']);
+    expect(logLines()).toContain('Stopped following references at 300 GitHub API calls, leaving out 2 more.');
+  });
+
+  it('keeps a context that fits whole, and logs no trimming', async () => {
+    const gh = makeClient({
+      commits: range(1, 50).map(n => commitFixing([n])),
+      compare: { files: ['src/index.ts'] },
+      issue: issueLookup(() => ({ body: 'x'.repeat(5000) })),
+    });
+
+    const context = await build(gh);
+
+    expect(context.linkedItems).toHaveLength(50);
+    expect(context.linkedItems.every(item => item.body?.length === 5000)).toBe(true);
+    expect(context.range.changedFiles).toEqual(['src/index.ts']);
+    expect(logLines().some(line => /trimmed|Dropped|Cut/.test(line))).toBe(false);
+  });
+
+  it('first drops the linked items found through other linked items', async () => {
+    // Issues 1 to 120 are short, and each refers to one of the long issues 1001 to 1120.
+    const gh = makeClient({
+      commits: range(1, 120).map(n => commitFixing([n])),
+      compare: { files: ['src/index.ts'] },
+      issue: issueLookup(number => ({ body: number < 1000 ? `Duplicate of #${number + 1000}` : 'x'.repeat(5000) })),
+    });
+
+    const context = await build(gh);
+
+    expect(context.linkedItems.map(item => item.id)).toEqual(range(1, 120).map(String));
+    expect(context.linkedItems[0]?.body).toBe('Duplicate of #1001');
+    expect(context.range.changedFiles).toEqual(['src/index.ts']);
+    expect(JSON.stringify(context).length).toBeLessThanOrEqual(MAX_CONTEXT_CHARS);
+    const lines = logLines();
+    expect(lines).toContainEqual(expect.stringMatching(/^The release context is about 1\d\dk tokens, over the limit of about 150k tokens, so it will be trimmed\.$/));
+    expect(lines).toContainEqual(expect.stringMatching(/^Dropped 120 linked item\(s\) found through other linked items, leaving about \d+k tokens\.$/));
+    expect(lines.some(line => /changed-file|Cut/.test(line))).toBe(false);
+  });
+
+  it('then drops the changed-file list', async () => {
+    const files = range(1, 300).map(n => `src/${'nested/'.repeat(40)}file${n}.ts`);
+    const gh = makeClient({
+      commits: range(1, 105).map(n => commitFixing([n])),
+      compare: { files, filesTruncated: true },
+      issue: issueLookup(() => ({ body: 'x'.repeat(5000) })),
+    });
+
+    const context = await build(gh);
+
+    expect(context.range).not.toHaveProperty('changedFiles');
+    expect(context.linkedItems).toHaveLength(105);
+    expect(context.linkedItems.every(item => item.body?.length === 5000)).toBe(true);
+    expect(JSON.stringify(context).length).toBeLessThanOrEqual(MAX_CONTEXT_CHARS);
+    expect(logLines()).toContainEqual(expect.stringMatching(/^Dropped the changed-file list, leaving about \d+k tokens\.$/));
+    expect(logLines().some(line => /Cut/.test(line))).toBe(false);
+  });
+
+  it('last cuts linked item bodies shorter, until the context fits', async () => {
+    // Each of 50 commits fixes five issues with 5,000-character bodies.
+    const gh = makeClient({
+      commits: range(0, 50).map(i => commitFixing(range(i * 5 + 1, 5))),
+      compare: { files: ['src/index.ts'] },
+      issue: issueLookup(() => ({ body: 'x'.repeat(5000) })),
+    });
+
+    const context = await build(gh);
+
+    expect(context.linkedItems).toHaveLength(250);
+    expect(context.linkedItems.every(item => item.body === `${'x'.repeat(997)}...`)).toBe(true);
+    expect(context.linkedItems[0]?.title).toBe('Issue 1');
+    expect(context.commits[0]?.message).toBe('Fixes #1, #2, #3, #4, #5');
+    expect(context.range).not.toHaveProperty('changedFiles');
+    expect(JSON.stringify(context).length).toBeLessThanOrEqual(MAX_CONTEXT_CHARS);
+    const lines = logLines();
+    expect(lines).toContainEqual(expect.stringMatching(/^Cut the bodies of 250 linked item\(s\) at 2,500 characters, leaving about \d+k tokens\.$/));
+    expect(lines).toContainEqual(expect.stringMatching(/^Cut the bodies of 250 linked item\(s\) at 1,000 characters, leaving about \d+k tokens\.$/));
+    expect(lines.some(line => line.includes('at 500 characters'))).toBe(false);
+    expect(core.warning).not.toHaveBeenCalled();
+  });
+
+  it('warns, and keeps the context, when trimming cannot make it fit', async () => {
+    // Commit messages are never cut below 5,000 characters, so 130 of them are too large for any trimming.
+    const commits = range(1, 130).map(n => makeCommit({ sha: shaFor(n), message: 'x'.repeat(5000), url: '' }));
+
+    const context = await build(makeClient({ commits }));
+
+    expect(context.commits).toHaveLength(130);
+    expect(core.warning).toHaveBeenCalledWith(expect.stringMatching(/^The release context is still about 1\d\dk tokens after trimming, so the model may not accept it\.$/));
   });
 });

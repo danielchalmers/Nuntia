@@ -61,7 +61,8 @@ export function buildPrompt(
   context: ReleaseContext,
   basePrompt: string
 ): { systemPrompt: string; userPrompt: string } {
-  const userPrompt = `=== RELEASE CONTEXT (JSON) ===\n${JSON.stringify(context, null, 2)}\n`;
+  // The JSON is compact, because indentation costs tokens without telling the model anything.
+  const userPrompt = `=== RELEASE CONTEXT (JSON) ===\n${JSON.stringify(context)}\n`;
 
   return { systemPrompt: basePrompt, userPrompt };
 }

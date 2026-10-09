@@ -194,17 +194,14 @@ describe('GitHubClient.compareCommits', () => {
 });
 
 describe('GitHubClient.getCommit', () => {
-  it.each([
-    ['prefixes the GitHub login with @', { author: { login: 'octocat' } }, '@octocat'],
-    ['falls back to the committer login', { committer: { login: 'web-flow' } }, '@web-flow'],
-    ['uses the git author name when there is no GitHub account', { commit: { message: 'm', author: { name: 'Jane Dev' } } }, 'Jane Dev'],
-    ['reports unknown when nothing identifies the author', { commit: { message: 'm' } }, 'unknown'],
-  ])('%s', async (_label, data, expected) => {
-    const client = makeClient({ repos: { getCommit: mockResponses({ sha: 'abc', ...data }) } });
+  it('keeps the sha, message and url, and leaves out the author and date', async () => {
+    const getCommit = mockResponses(makeCompareCommit(7));
+    const client = makeClient({ repos: { getCommit } });
 
-    const commit = await client.getCommit('acme', 'widgets', 'abc');
+    const commit = await client.getCommit('other', 'repo', 'abc');
 
-    expect(commit.author).toBe(expected);
+    expect(commit).toEqual({ sha: makeCompareCommit(7).sha, message: 'Commit 7', url: makeCompareCommit(7).html_url });
+    expect(getCommit).toHaveBeenCalledWith({ owner: 'other', repo: 'repo', ref: 'abc' });
   });
 });
 

@@ -66,8 +66,6 @@ const RANGE: ReleaseRange = {
 };
 
 const CONTEXT: ReleaseContext = {
-  generatedAt: '2024-01-01T00:00:00.000Z',
-  inputs: { promptUrl: CONFIG.promptUrl, model: CONFIG.model },
   repository: { owner: 'acme', repo: 'widgets', branch: 'main' },
   release: RANGE.release,
   range: { base: 'v1.0.0', head: 'v1.1.0', totalCommits: 2, changedFiles: [] },
@@ -141,7 +139,7 @@ describe('Nuntia action entry point', () => {
     expect(Object.keys(request)).toEqual(['model', 'systemPrompt', 'userPrompt']);
     expect(request.model).toBe('gemini-flash-latest');
     expect(request.systemPrompt).toBe(BUNDLED_PROMPT);
-    expect(request.userPrompt).toContain('"totalCommits": 2');
+    expect(request.userPrompt).toContain('"totalCommits":2');
     expect(fetchMock).not.toHaveBeenCalled();
     expect(console.log).toHaveBeenCalledWith('Prompt: built-in');
   });
