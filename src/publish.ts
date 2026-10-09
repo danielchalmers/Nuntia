@@ -14,6 +14,14 @@ function count(text: string, part: string): number {
   return text.split(part).length - 1;
 }
 
+/** Whether body has GitHub's generated release notes outside Nuntia's own section. */
+export function hasGeneratedNotes(body: string): boolean {
+  const start = body.indexOf(NOTES_START);
+  const end = start < 0 ? -1 : body.indexOf(NOTES_END, start);
+  const rest = end < 0 ? body : body.slice(0, start) + body.slice(end + NOTES_END.length);
+  return rest.includes(GENERATED_NOTES_COMMENT) || GENERATED_NOTES_HEADING.test(rest);
+}
+
 /**
  * The release body with Nuntia's section set to section.
  * The text between the markers is replaced, and a body without markers gets the section just before GitHub's generated notes, or at the top when it has none.

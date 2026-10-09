@@ -109,11 +109,20 @@ describe('resolveRange', () => {
         base: 'v1.0.0',
         head: 'v1.1.0',
         branch: 'dev',
-        release: { tag: 'v1.1.0', previousTag: 'v1.0.0', name: 'Widgets 1.1', prerelease: true },
+        release: { tag: 'v1.1.0', previousTag: 'v1.0.0', name: 'Widgets 1.1', prerelease: true, hasChangeList: true },
       });
       expect(client.findReleaseByTag).not.toHaveBeenCalled();
       expect(client.generateReleaseNotes).not.toHaveBeenCalled();
       expect(console.log).toHaveBeenCalledWith("Release v1.1.0: the commits after v1.0.0, from the release's Full Changelog link.");
+    });
+
+    it("marks a release that has a Full Changelog line but not GitHub's list of changes", async () => {
+      const client = makeClient();
+
+      const range = await resolve(client, { eventName: 'release', release: makeRelease({ body: `Hand-written notes.\n\n${COMPARE_LINE}` }) });
+
+      expect(range).toMatchObject({ base: 'v1.0.0', release: { hasChangeList: false } });
+      expect(client.generateReleaseNotes).not.toHaveBeenCalled();
     });
 
     it('asks GitHub to generate release notes when the release has no Full Changelog line', async () => {
@@ -122,7 +131,8 @@ describe('resolveRange', () => {
       const range = await resolve(client, { eventName: 'release', release: makeRelease({ body: 'Hand-written notes.' }) });
 
       expect(client.generateReleaseNotes).toHaveBeenCalledWith('v1.1.0');
-      expect(range).toMatchObject({ base: 'v1.0.1', head: 'v1.1.0', release: { previousTag: 'v1.0.1' } });
+      // The generated notes only supply the range, so the release itself still has no list of changes.
+      expect(range).toMatchObject({ base: 'v1.0.1', head: 'v1.1.0', release: { previousTag: 'v1.0.1', hasChangeList: false } });
       expect(console.log).toHaveBeenCalledWith("Release v1.1.0: the commits after v1.0.1, from GitHub's generated release notes.");
     });
 

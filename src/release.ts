@@ -1,4 +1,5 @@
 import { httpStatus, type GitHubClient, type ReleaseDetails } from './github';
+import { hasGeneratedNotes } from './publish';
 import type { ReleaseRange, Trigger } from './types';
 
 // A reason to stop without writing notes that isn't a failure, such as a first release.
@@ -86,7 +87,13 @@ async function releaseRange(gh: GitHubClient, release: ReleaseDetails, owner: st
     head: release.tag,
     // On a release event the run's ref is the tag, so the release names its branch.
     branch: release.targetCommitish,
-    release: { tag: release.tag, previousTag: link.base, name: release.name, prerelease: release.prerelease },
+    release: {
+      tag: release.tag,
+      previousTag: link.base,
+      name: release.name,
+      prerelease: release.prerelease,
+      hasChangeList: hasGeneratedNotes(release.body),
+    },
   };
 }
 

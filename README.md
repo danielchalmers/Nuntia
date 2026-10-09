@@ -6,7 +6,7 @@
 
 Nuntia is a GitHub Action that writes release notes and migration guides for each release: it gathers the commits since the previous release, follows the issues, pull requests, and commits they reference, and feeds the full context to the model you pick (Gemini, Claude, OpenAI, or any OpenAI-compatible service) with a prompt you control. It runs in your workflow when you publish a release, with your own API key — no service to host — and writes its section into that release, above GitHub's own change list.
 
-The default prompt produces a themed changelog rather than a per-commit log: a highlights section, an upgrading section with breaking changes and before/after diffs, and net changes grouped by feature area with trailing reference links. The prompt ships with the action, so pinning a version of Nuntia pins the prompt too, and you can try your own format through `prompt-url` without forking the action.
+The default prompt writes what GitHub's generated list can't: an optional headline, a few highlights, and the steps to upgrade, with before/after diffs where the pull requests show the code. When the release has no generated list, as in a preview, it adds a short list of changes grouped by area. The prompt ships with the action, so pinning a version of Nuntia pins the prompt too, and you can try your own format through `prompt-url` without forking the action.
 
 ## Quick start
 
@@ -51,7 +51,7 @@ jobs:
   - **No Full Changelog line.** Nuntia asks GitHub to generate release notes for the tag and reads the line from those. GitHub requires `contents: write` for that call, which the workflow already has for writing the notes.
   - **A first release** links to `/commits/TAG` instead, so there is nothing to compare it with. Nuntia logs a notice and stops without failing. To cover it anyway, add a Full Changelog line that compares it with an earlier tag, then run the workflow on the tag.
 - **Any other run**, such as running the workflow from a branch, previews the next release: the commits after the latest release, up to the run's commit. Without a published release it starts from the newest tag by commit date, and with no tags at all it logs a notice and stops. A preview never asks GitHub to generate release notes.
-- **The context** names the release's tag, previous tag, name and whether it's a prerelease, so the notes can use the version. The branch is the one the release was created from.
+- **The context** names the release's tag, previous tag, name and whether it's a prerelease, so the notes can use the version. It also says whether the release body already has GitHub's generated list (its `<!-- Release notes generated` comment or `## What's Changed` heading), so the notes don't repeat it. The branch is the one the release was created from.
 - **Re-running a release's job** takes the commits from the release as it was when it was published. To pick up an edited Full Changelog line, run the workflow on the release's tag instead, which reads the release again.
 - **The workflow file has to exist at the tag's commit**, because GitHub runs a release's workflows as they were at its tag.
 - **Releases created with `GITHUB_TOKEN`**, such as by release-please, semantic-release or `gh release create` in another workflow, never fire `release: published`. Run Nuntia on the tag afterwards, or publish with a different token.
@@ -79,6 +79,8 @@ jobs:
 ## Prompt
 
 The default prompt is [`examples/Nuntia.prompt`](./examples/Nuntia.prompt), bundled into the action, so a pinned version of Nuntia always uses the same prompt.
+
+It is a short brief followed by two worked examples from MudBlazor: v9.0.0, a major release with a headline, highlights and numbered migration steps with before/after diffs, and v9.10.0, a minor release with a few highlights and two upgrading notes. The model first sizes up the release from its version change and what the changes do, then follows the shape of the closer example, so a patch gets a few lines and a major release gets a migration guide. The quickest way to change the style is to replace the examples with notes written the way you want.
 
 `prompt-url` is for trying a prompt without committing it. Copy the default prompt, change it, host it at a raw URL such as a gist or a raw file in any repository, and set `prompt-url` to that URL. Leave it blank to go back to the bundled prompt.
 

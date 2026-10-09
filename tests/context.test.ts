@@ -32,7 +32,7 @@ const RANGE: ReleaseRange = {
   base: 'v1.0.0',
   head: 'v1.1.0',
   branch: 'main',
-  release: { tag: 'v1.1.0', previousTag: 'v1.0.0', name: 'Widgets 1.1', prerelease: false },
+  release: { tag: 'v1.1.0', previousTag: 'v1.0.0', name: 'Widgets 1.1', prerelease: false, hasChangeList: true },
 };
 
 function makeCommit(overrides: Partial<CommitDetails> = {}): CommitDetails {
@@ -108,7 +108,7 @@ describe('buildReleaseContext', () => {
     const context = await build(makeClient());
 
     expect(context.repository).toEqual({ owner: 'acme', repo: 'widgets', branch: 'main' });
-    expect(context.release).toEqual({ tag: 'v1.1.0', previousTag: 'v1.0.0', name: 'Widgets 1.1', prerelease: false });
+    expect(context.release).toEqual({ tag: 'v1.1.0', previousTag: 'v1.0.0', name: 'Widgets 1.1', prerelease: false, hasChangeList: true });
   });
 
   it('has no release when previewing the next one', async () => {

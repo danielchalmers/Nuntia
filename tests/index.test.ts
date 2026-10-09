@@ -72,7 +72,7 @@ const RANGE: ReleaseRange = {
   base: 'v1.0.0',
   head: 'v1.1.0',
   branch: 'main',
-  release: { tag: 'v1.1.0', previousTag: 'v1.0.0', name: null, prerelease: false },
+  release: { tag: 'v1.1.0', previousTag: 'v1.0.0', name: null, prerelease: false, hasChangeList: true },
 };
 
 const CONTEXT: ReleaseContext = {
