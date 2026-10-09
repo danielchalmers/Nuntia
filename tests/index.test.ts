@@ -2,6 +2,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { ModelError } from '../src/llm/chat';
 import type { Config, ReleaseContext, ReleaseRange } from '../src/types';
 
 // src/index.ts runs the action as soon as it is imported, so every collaborator with I/O is mocked and each test imports a fresh copy.
@@ -301,10 +302,10 @@ describe('Nuntia action entry point', () => {
     expect(mocks.generateText).not.toHaveBeenCalled();
   });
 
-  it('logs the tokens used, with generated tokens excluding reasoning', async () => {
+  it('logs how long the call took and the tokens used, with generated tokens excluding reasoning', async () => {
     await runAction();
 
-    expect(console.log).toHaveBeenCalledWith('Used 1200 input tokens, 340 output tokens.');
+    expect(console.log).toHaveBeenCalledWith(expect.stringMatching(/^Generated in \d+\.\ds, using 1200 input tokens and 340 output tokens\.$/));
   });
 
   it('writes the payload and context debug artifacts', async () => {
@@ -341,20 +342,53 @@ describe('Nuntia action entry point', () => {
     expect(fs.existsSync(path.join(tempDir, 'artifacts'))).toBe(false);
   });
 
-  it('keeps the debug artifacts but writes no notes, summary, or outputs when generation fails', async () => {
+  it.each([
+    ['retryable', 'generativelanguage.googleapis.com gave no usable reply within the 15-minute limit for a call, after 3 attempts.'],
+    ['capacity', 'generativelanguage.googleapis.com returned HTTP 503: The model is overloaded.'],
+    ['permanent', 'generativelanguage.googleapis.com stopped the reply at the output token limit'],
+  ] as const)('only warns, keeping the debug artifacts but writing no notes, when the model call fails (%s)', async (kind, message) => {
     vi.stubEnv('GITHUB_STEP_SUMMARY', path.join(tempDir, 'summary.md'));
-    mocks.generateText.mockRejectedValue(new Error('generativelanguage.googleapis.com stopped the reply at the output token limit'));
+    mocks.generateText.mockRejectedValue(new ModelError(message, kind));
 
     await runAction();
 
     const artifacts = path.join(tempDir, 'artifacts');
-    expect(mocks.setFailed).toHaveBeenCalledWith('generativelanguage.googleapis.com stopped the reply at the output token limit');
+    expect(mocks.warning).toHaveBeenCalledWith(`No release notes were written: ${message}`);
+    expect(mocks.summary.addRaw).toHaveBeenCalledWith(`No release notes were written: ${message}\n`);
+    expect(mocks.summary.write).toHaveBeenCalled();
+    expect(mocks.setFailed).not.toHaveBeenCalled();
+    expect(mocks.readReleaseBody).not.toHaveBeenCalled();
     expect(mocks.updateReleaseBody).not.toHaveBeenCalled();
-    expect(mocks.summary.write).not.toHaveBeenCalled();
     expect(fs.existsSync(path.join(artifacts, 'nuntia-release-notes.md'))).toBe(false);
     expect(JSON.parse(fs.readFileSync(path.join(artifacts, 'nuntia-context.json'), 'utf8'))).toEqual(CONTEXT);
     expect(JSON.parse(fs.readFileSync(path.join(artifacts, 'nuntia-payload.json'), 'utf8'))).toMatchObject({
       model: 'gemini-flash-latest',
     });
+  });
+
+  it('fails, keeping the debug artifacts but writing no notes or summary, when the provider rejects the key', async () => {
+    vi.stubEnv('GITHUB_STEP_SUMMARY', path.join(tempDir, 'summary.md'));
+    const message = 'generativelanguage.googleapis.com returned HTTP 401: API key not valid. Check GEMINI_API_KEY.';
+    mocks.generateText.mockRejectedValue(new ModelError(message, 'fatal'));
+
+    await runAction();
+
+    const artifacts = path.join(tempDir, 'artifacts');
+    expect(mocks.setFailed).toHaveBeenCalledWith(message);
+    expect(mocks.warning).not.toHaveBeenCalled();
+    expect(mocks.summary.write).not.toHaveBeenCalled();
+    expect(mocks.updateReleaseBody).not.toHaveBeenCalled();
+    expect(fs.existsSync(path.join(artifacts, 'nuntia-release-notes.md'))).toBe(false);
+    expect(fs.existsSync(path.join(artifacts, 'nuntia-payload.json'))).toBe(true);
+  });
+
+  it('fails when the model call throws something other than a model error, because that is a bug', async () => {
+    mocks.generateText.mockRejectedValue(new TypeError("Cannot read properties of undefined (reading 'choices')"));
+
+    await runAction();
+
+    expect(mocks.setFailed).toHaveBeenCalledWith("Cannot read properties of undefined (reading 'choices')");
+    expect(mocks.warning).not.toHaveBeenCalled();
+    expect(mocks.updateReleaseBody).not.toHaveBeenCalled();
   });
 });

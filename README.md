@@ -103,9 +103,9 @@ These defaults favor quality over cost, because the notes come from one call per
 - **With one key set**, `model` goes to it. With several, a `gemini-*` or `claude-*` model goes to Gemini or Claude when that key is set, and any other model goes to OpenAI or `OPENAI_BASE_URL`.
 - **Any OpenAI-compatible service** (OpenRouter, Azure OpenAI, Groq, Mistral, xAI, DeepSeek, Together, Fireworks, Cerebras, LiteLLM, vLLM, Ollama, ...) works by setting `OPENAI_BASE_URL` to its API base and `model` to a model it serves, such as `anthropic/claude-sonnet-5.5` on OpenRouter.
 - **A `model` input passed through from `workflow_dispatch`** keeps sending its default after you switch keys. Give that input a default of `""` and set `required: false`, so the default for the key you set is used.
-- **The log names the model and host**, such as `Model: claude-sonnet-5-5 at api.anthropic.com (default for ANTHROPIC_API_KEY)`.
+- **The log names the model and host**, such as `Model: claude-sonnet-5-5 at api.anthropic.com (default for ANTHROPIC_API_KEY)`, and after the call, how long it took and the tokens it used.
 - **Each provider runs at its default reasoning level.** Reasoning that a provider returns separately, or in a `<think>` block at the start of the reply, is left out of the notes.
-- **Failures.** A bad key, an unknown model, or a billing problem fails at once and says what to check. An overloaded or rate-limited provider is retried for a few minutes. Notes cut off at the output limit, or a refusal, fail the run without writing a notes file.
+- **Failures.** A bad key, an unknown model, or a billing problem fails the run at once and says what to check. An overloaded or rate-limited provider is retried for a few minutes. Each request to the model gets up to 10 minutes, and the whole call gets 15 minutes counting its retries and waits. While a request is waiting, the log notes each minute that passes. A call that runs out of time, an overload that outlasts the retries, notes cut off at the output limit, or a refusal leave a warning in the log and the job summary and no notes, without failing the run. Re-run the job to try again.
 - **Your data.** Commit messages and linked issue and pull request text go to the provider you pick. Gateways such as OpenRouter forward the text to further providers.
 
 ## Inputs

@@ -1,7 +1,7 @@
 import { createServer, type IncomingHttpHeaders, type Server } from 'node:http'
 import type { AddressInfo } from 'node:net'
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi, type MockInstance } from 'vitest'
-import { ChatClient, createModelFetch, errorMessage, MODEL_TIMEOUT_MS, ModelError, type Fetch, type JsonRequest } from '../../src/llm/chat'
+import { CALL_DEADLINE_MS, ChatClient, createModelFetch, describeReasoning, errorMessage, HEARTBEAT_MS, MODEL_TIMEOUT_MS, ModelError, type Fetch, type JsonRequest } from '../../src/llm/chat'
 
 const SCHEMA = { type: 'object', properties: { ok: { type: 'boolean' } }, required: ['ok'], additionalProperties: false }
 const REQUEST: JsonRequest = { model: 'test-model', systemPrompt: 'system', userPrompt: 'user', schema: SCHEMA }
@@ -28,13 +28,22 @@ function error(status: number, body: unknown, headers: Record<string, string> = 
   return new Response(typeof body === 'string' ? body : JSON.stringify(body), { status, headers: { 'content-type': 'application/json', ...headers } })
 }
 
+// A request that never answers, until its signal aborts it.
+function hang(_url: unknown, init?: RequestInit): Promise<Response> {
+  return new Promise((_resolve, reject) => {
+    init?.signal?.addEventListener('abort', () => reject(new DOMException('This operation was aborted', 'AbortError')))
+  })
+}
+
 let sleep: MockInstance
 let warn: MockInstance
+let log: MockInstance
 
 beforeEach(() => {
   // Retries wait on the real clock otherwise.
   sleep = vi.spyOn(ChatClient.prototype as any, 'sleep').mockResolvedValue(undefined)
   warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+  log = vi.spyOn(console, 'log').mockImplementation(() => {})
 })
 
 afterEach(() => {
@@ -223,17 +232,83 @@ describe('ChatClient errors', () => {
     expect(badRequest).toHaveBeenCalledOnce()
   })
 
-  it('gives up on a request that runs past the deadline, and retries it', async () => {
+  it('gives up on a request that runs past the per-attempt timeout, and retries it', async () => {
     vi.useFakeTimers()
-    const fetch = vi.fn<Fetch>((_url, init) => new Promise((_resolve, reject) => {
-      init?.signal?.addEventListener('abort', () => reject(new DOMException('This operation was aborted', 'AbortError')))
-    }))
+    const fetch = vi.fn<Fetch>().mockImplementationOnce(hang).mockResolvedValueOnce(Response.json(reply('Release notes')))
+    const call = new ChatClient(OPENAI, fetch).generateText(REQUEST)
+
+    await vi.advanceTimersByTimeAsync(MODEL_TIMEOUT_MS)
+
+    expect((await call).text).toBe('Release notes')
+    expect(fetch).toHaveBeenCalledTimes(2)
+    expect(warn).toHaveBeenCalledWith(`Model call failed (retryable); retrying in 5s: api.openai.com did not respond within ${MODEL_TIMEOUT_MS / 1000}s`)
+  })
+
+  it('fails a call still waiting at the overall deadline as retryable, without another attempt', async () => {
+    vi.useFakeTimers()
+    const fetch = vi.fn<Fetch>(hang)
     const call = new ChatClient(OPENAI, fetch).generateText(REQUEST).catch((err: unknown) => err)
 
-    for (let attempt = 0; attempt < 3; attempt++) await vi.advanceTimersByTimeAsync(MODEL_TIMEOUT_MS)
+    await vi.advanceTimersByTimeAsync(CALL_DEADLINE_MS)
 
-    expect(await call).toMatchObject({ kind: 'retryable', message: `api.openai.com did not respond within ${MODEL_TIMEOUT_MS / 1000}s` })
-    expect(fetch).toHaveBeenCalledTimes(3)
+    expect(await call).toMatchObject({
+      kind: 'retryable',
+      message: `api.openai.com gave no usable reply within the 15-minute limit for a call, after 2 attempts. The last failure was: api.openai.com did not respond within ${MODEL_TIMEOUT_MS / 1000}s`,
+    })
+    expect(fetch).toHaveBeenCalledTimes(2)
+    expect(vi.getTimerCount()).toBe(0)
+  })
+
+  it('cuts a retry wait short at the overall deadline', async () => {
+    vi.useFakeTimers()
+    sleep.mockRestore()
+    const start = Date.now()
+    // After a 5-second wait, the second attempt gets an overload 5 seconds before the deadline, so its 10-second wait would run past it.
+    const fetch = vi.fn<Fetch>().mockImplementationOnce(hang).mockImplementationOnce(() => new Promise(resolve => {
+      setTimeout(() => resolve(error(503, 'overloaded')), CALL_DEADLINE_MS - MODEL_TIMEOUT_MS - 5_000 - 5_000)
+    }))
+    const call = new ChatClient(OPENAI, fetch).generateText(REQUEST).catch((err: unknown) => ({ err, elapsed: Date.now() - start }))
+
+    await vi.advanceTimersByTimeAsync(CALL_DEADLINE_MS)
+
+    expect(await call).toMatchObject({
+      err: { kind: 'retryable', message: 'api.openai.com gave no usable reply within the 15-minute limit for a call, after 2 attempts. The last failure was: api.openai.com returned HTTP 503: overloaded' },
+      elapsed: CALL_DEADLINE_MS,
+    })
+    expect(fetch).toHaveBeenCalledTimes(2)
+    expect(vi.getTimerCount()).toBe(0)
+  })
+
+  it('logs each minute a request is still waiting, and stops once it ends', async () => {
+    vi.useFakeTimers()
+    const fetch = vi.fn<Fetch>(() => new Promise(resolve => setTimeout(() => resolve(Response.json(reply('Release notes'))), 2.5 * HEARTBEAT_MS)))
+    const call = new ChatClient(OPENAI, fetch).generateText(REQUEST)
+
+    await vi.advanceTimersByTimeAsync(2.5 * HEARTBEAT_MS)
+
+    expect((await call).text).toBe('Release notes')
+    expect(log.mock.calls).toEqual([['Still waiting for api.openai.com after 1 min...'], ['Still waiting for api.openai.com after 2 min...']])
+    expect(vi.getTimerCount()).toBe(0)
+  })
+
+  it.each([
+    ['answers', reply('{"ok":true}')],
+    ['fails', error(401, { error: { message: 'Incorrect API key provided' } })],
+  ])('leaves no timer running after a call that %s', async (_case, response) => {
+    vi.useFakeTimers()
+
+    await new ChatClient(OPENAI, stubFetch(response)).generateJson(REQUEST, data => data).catch(() => {})
+
+    expect(vi.getTimerCount()).toBe(0)
+  })
+})
+
+describe('describeReasoning', () => {
+  it('states the reasoning a JSON call gets, and that Claude ignores reasoning_effort', () => {
+    expect(describeReasoning('api.openai.com')).toBe('reasoning: high')
+    expect(describeReasoning('generativelanguage.googleapis.com')).toBe('reasoning: high')
+    expect(describeReasoning('api.anthropic.com')).toBe('reasoning: provider default (api.anthropic.com ignores reasoning_effort)')
+    expect(describeReasoning('openrouter.ai')).toBe('reasoning: high if openrouter.ai honors reasoning_effort')
   })
 })
 
@@ -335,5 +410,20 @@ describe('transport', () => {
       message: 'local redirected the request (HTTP 308), and redirects are not followed because the request carries the API key.',
     })
     expect(requests.map(request => request.path)).toEqual(['/moved/v1/chat/completions'])
+  })
+})
+
+describe('errorMessage', () => {
+  it('appends the cause code that fetch hides behind "fetch failed"', () => {
+    const cause = Object.assign(new Error('Headers Timeout Error'), { code: 'UND_ERR_HEADERS_TIMEOUT' })
+
+    expect(errorMessage(Object.assign(new TypeError('fetch failed'), { cause }))).toBe('fetch failed (UND_ERR_HEADERS_TIMEOUT)')
+  })
+
+  it('leaves messages without a cause code unchanged', () => {
+    expect(errorMessage(new Error('bad request'))).toBe('bad request')
+    expect(errorMessage(Object.assign(new Error('wrapped'), { cause: new Error('no code') }))).toBe('wrapped')
+    expect(errorMessage(Object.assign(new Error('wrapped'), { cause: { code: 503 } }))).toBe('wrapped')
+    expect(errorMessage('socket hang up')).toBe('socket hang up')
   })
 })
