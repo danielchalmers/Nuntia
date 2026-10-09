@@ -34,7 +34,6 @@ jobs:
           base-commit: ${{ github.sha }}
           head-commit: ${{ github.sha }}
           branch: ${{ github.ref_name }}
-          prompt-url: "https://raw.githubusercontent.com/danielchalmers/Nuntia/${{ github.sha }}/examples/Nuntia.prompt"
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}

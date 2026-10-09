@@ -53,6 +53,22 @@ function parseBranchInput(input: string): BranchTarget {
   return { branch: trimmed };
 }
 
+// Blank means the prompt bundled with the action.
+function parsePromptUrl(input: string): string {
+  const trimmed = input.trim();
+  if (!trimmed) return '';
+  let protocol = '';
+  try {
+    protocol = new URL(trimmed).protocol;
+  } catch {
+    // Reported below.
+  }
+  if (protocol !== 'https:' && protocol !== 'http:') {
+    throw new Error(`prompt-url must be an http or https URL, or blank to use the bundled prompt: ${trimmed}`);
+  }
+  return trimmed;
+}
+
 /**
  * The repository the workflow runs in.
  * context.repo already falls back from GITHUB_REPOSITORY to the event payload, and throws when neither is available.
@@ -86,7 +102,7 @@ function readModelEnv(): ModelEnv {
 
 /**
  * Resolve runtime config.
- * Throws early with actionable messages if GITHUB_TOKEN is missing, no model API key is set, or repo context is absent.
+ * Throws early with actionable messages if GITHUB_TOKEN is missing, no model API key is set, repo context is absent, or prompt-url isn't a URL.
  */
 export function getConfig(): Config {
   const token = process.env.GITHUB_TOKEN || '';
@@ -99,7 +115,7 @@ export function getConfig(): Config {
   const { branch, repository } = parseBranchInput(requireInput('branch'));
   // Only consult the workflow's repository when the branch input doesn't name one, so owner/repo@branch works without repository context.
   const { owner, repo } = repository ?? resolveWorkflowRepository();
-  const promptUrl = core.getInput('prompt-url');
+  const promptUrl = parsePromptUrl(core.getInput('prompt-url'));
   const maxLinkedItems = Math.max(0, Math.floor(parseNumber(core.getInput('max-linked-items') || '5', 5)));
   const maxReferenceDepth = Math.max(0, Math.floor(parseNumber(core.getInput('max-reference-depth') || '2', 2)));
   const maxItemLength = Math.max(0, Math.floor(parseNumber(core.getInput('max-item-length') || '5000', 5000)));

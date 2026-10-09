@@ -187,8 +187,20 @@ describe('getConfig', () => {
   });
 
   it('passes the model and prompt URL inputs through', () => {
-    setInputs({ ...REQUIRED_INPUTS, model: 'gemini-custom', 'prompt-url': 'https://example.com/p.txt' });
+    setInputs({ ...REQUIRED_INPUTS, model: 'gemini-custom', 'prompt-url': ' https://example.com/p.txt\n' });
 
     expect(getConfig()).toMatchObject({ model: 'gemini-custom', promptUrl: 'https://example.com/p.txt', endpoint: { provider: 'gemini' } });
+  });
+
+  it('treats a prompt-url of only whitespace as blank, so the bundled prompt is used', () => {
+    setInputs({ ...REQUIRED_INPUTS, 'prompt-url': '  \n' });
+
+    expect(getConfig()).toMatchObject({ promptUrl: '' });
+  });
+
+  it.each(['examples/Nuntia.prompt', 'file:///etc/passwd', 'ftp://example.com/p.txt'])('rejects a prompt-url of %j, which is not an http or https URL', (promptUrl) => {
+    setInputs({ ...REQUIRED_INPUTS, 'prompt-url': promptUrl });
+
+    expect(() => getConfig()).toThrow(`prompt-url must be an http or https URL, or blank to use the bundled prompt: ${promptUrl}`);
   });
 });

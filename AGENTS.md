@@ -20,7 +20,7 @@ Nuntia is a GitHub Action that generates release notes and migration guides from
 Nuntia/
 ├── .github/          # GitHub workflows and configuration
 ├── dist/             # Compiled output (generated, committed to repo)
-├── examples/         # Example workflows
+├── examples/         # Default prompt (bundled into dist) and example workflow
 ├── src/              # TypeScript source code
 │   └── llm/          # Shared model layer, copied verbatim from AutoTriage
 ├── tests/            # Test files using Vitest
@@ -85,6 +85,7 @@ npm test
 
 - Tests use Vitest with Node.js environment
 - Test files: `tests/**/*.test.ts`
+- `vitest.config.ts` loads `.prompt` imports as text, matching the build, so tests see the bundled prompt
 
 ## Shared Model Layer
 
@@ -110,6 +111,7 @@ This command performs the following steps:
 1. **Type-checking** (`npm run typecheck`) - Validates TypeScript code
 2. **Clean** (`npm run clean`) - Removes the existing dist folder
 3. **Bundle** (`esbuild`) - Bundles TypeScript into a single `dist/index.js`
+   - Inlines `examples/Nuntia.prompt` as text (`--loader:.prompt=text`)
    - Minifies the output
    - Appends third-party license notices to the end of the file
    - Emits one file only (no code-split chunks or source map)
@@ -178,8 +180,9 @@ The action is defined in `action.yml` and runs from `dist/index.js`. Key points:
 - **Entry point**: `dist/index.js`
 - **Runtime**: Node.js 24 (specified in `action.yml`)
 - **Inputs**: Defined in `action.yml`
-- **Prompt URL input**: `prompt-url` (required; fetches raw prompt content)
-- **Prompt template**: `examples/Nuntia.prompt` (reference source; not loaded automatically)
+- **Default prompt**: `examples/Nuntia.prompt`, bundled into `dist/index.js` and used when `prompt-url` is blank. Editing it changes runtime output, so rebuild `dist/`.
+- **Prompt URL input**: `prompt-url` (optional) fetches a prompt to try without committing it, with a 30-second timeout and two retries. A prompt that still can't be fetched fails the run.
+- **Workspace**: the action reads everything through the GitHub API, so consumers need no checkout step.
 
 ## File Artifacts
 
@@ -219,7 +222,7 @@ The action does not upload them itself (that would require bundling `@actions/ar
 
 - **README.md** - User-facing documentation and setup guide
 - **action.yml** - GitHub Action configuration and input definitions
-- **examples/** - Prompt template and sample workflow configurations
+- **examples/** - The default prompt (bundled into `dist/`) and the sample workflow
 - **.github/workflows/** - CI/CD pipeline definitions
 
 ## Questions?

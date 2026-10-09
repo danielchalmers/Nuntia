@@ -6,7 +6,7 @@
 
 Nuntia is a GitHub Action that writes release notes and migration guides from a commit range: it gathers commit messages, follows the issues, pull requests, and commits they reference, and feeds the full context to the model you pick (Gemini, Claude, OpenAI, or any OpenAI-compatible service) with a prompt you control. It runs on demand in your workflow with your own API key — no service to host.
 
-The default prompt produces a themed changelog rather than a per-commit log: a highlights section, an upgrading section with breaking changes and before/after diffs, and net changes grouped by feature area with trailing reference links. The prompt is fetched from a URL, so you can swap in your own format without forking the action.
+The default prompt produces a themed changelog rather than a per-commit log: a highlights section, an upgrading section with breaking changes and before/after diffs, and net changes grouped by feature area with trailing reference links. The prompt ships with the action, so pinning a version of Nuntia pins the prompt too, and you can try your own format through `prompt-url` without forking the action.
 
 ## Quick start
 
@@ -34,8 +34,6 @@ jobs:
       issues: read
       pull-requests: read
     steps:
-      - uses: actions/checkout@v7
-
       - uses: danielchalmers/Nuntia@main
         with:
           base-commit: ${{ inputs.base-commit }}
@@ -53,14 +51,24 @@ jobs:
 ```
 
 3. Run it from the Actions tab with the first and last commit of the release, then download the release notes from the run's artifacts.
-4. Optionally write your own prompt — start from the [example prompt](./examples/Nuntia.prompt), host it anywhere with a raw URL (a Gist works well), and point `prompt-url` at it.
+4. Optionally try your own prompt with `prompt-url` (see [Prompt](#prompt)).
 
 ## How it works
 
 - Resolves the inclusive commit range from the base commit, head commit, and branch.
 - Scrapes commit messages and follows linked issues, PRs, and commits, with configurable depth and caps.
-- Sends the aggregated context to the model using the prompt fetched from `prompt-url`.
+- Sends the aggregated context to the model with the bundled prompt, or the one at `prompt-url` when it's set.
 - Writes the release notes markdown (plus payload/context debug files) to the `artifacts/` directory for your workflow to upload.
+- Reads everything through the GitHub API, so the job needs no checkout step.
+
+## Prompt
+
+The default prompt is [`examples/Nuntia.prompt`](./examples/Nuntia.prompt), bundled into the action, so a pinned version of Nuntia always uses the same prompt.
+
+`prompt-url` is for trying a prompt without committing it. Copy the default prompt, change it, host it at a raw URL such as a gist or a raw file in any repository, and set `prompt-url` to that URL. Leave it blank to go back to the bundled prompt.
+
+- **The log names the prompt**, as `Prompt: built-in` or `Prompt: <url>`.
+- **The fetch** times out after 30 seconds and is retried twice when it times out, the connection fails, or the host returns 408, 429 or a 5xx status. If the prompt still can't be fetched, or the URL returns another error status or an empty file, the run fails without calling the model.
 
 ## Models
 
@@ -90,7 +98,7 @@ These defaults favor quality over cost, because the notes come from one call per
 | `base-commit` | Start commit SHA (inclusive). | Required |
 | `head-commit` | End commit SHA (inclusive). | Required |
 | `branch` | Branch name (`branch` or `owner/repo@branch`). | Required |
-| `prompt-url` | URL to raw prompt template content. | [example prompt](./examples/Nuntia.prompt) |
+| `prompt-url` | Raw URL of a prompt to try instead of the bundled one, such as a gist (see [Prompt](#prompt)). | Blank, which uses the [bundled prompt](./examples/Nuntia.prompt) |
 | `model` | Model that writes the notes. | The default for the API key you set (see [Models](#models)) |
 | `max-linked-items` | Maximum linked issues/PRs/commits to fetch. | `5` |
 | `max-reference-depth` | Depth to follow references inside linked descriptions. | `2` |
