@@ -1,6 +1,7 @@
 import * as fs from 'fs';
 import { describe, it, expect, vi, afterEach, beforeEach, type MockInstance } from 'vitest';
 import { buildPrompt, loadPrompt } from '../src/prompt';
+import { sanitizeNotes } from '../src/sanitize';
 import type { ReleaseContext } from '../src/types';
 
 const PROMPT_URL = 'https://example.com/prompt.txt';
@@ -9,7 +10,7 @@ const HINT = 'Check prompt-url, or leave it blank to use the bundled prompt.';
 describe('buildPrompt', () => {
   const context: ReleaseContext = {
     repository: { owner: 'acme', repo: 'widgets', branch: 'main' },
-    release: { tag: 'v1.1.0', previousTag: 'v1.0.0', name: 'Widgets 1.1', prerelease: false },
+    release: { tag: 'v1.1.0', previousTag: 'v1.0.0', name: 'Widgets 1.1', prerelease: false, hasChangeList: true },
     range: { base: 'v1.0.0', head: 'v1.1.0', totalCommits: 1, changedFiles: [] },
     commits: [],
     linkedItems: [
@@ -92,10 +93,26 @@ describe('loadPrompt', () => {
   it('tells the model, for a published release, to skip the H1 and leave out maintenance work', async () => {
     const { text } = await loadPrompt('');
 
-    expect(text).toContain('When `release` is set, the notes are written into that release on GitHub, which already shows its title, so do not write an H1.');
+    expect(text).toContain("When `release` is set, the release page already shows its title, so don't write an H1.");
     expect(text).toContain(
       'When `release` is set, leave out build, CI, documentation, test, dependency-update and refactoring work, and anything labeled `skip changelog`.'
     );
+  });
+
+  it("asks for changes by area only when GitHub's list isn't already in the release", async () => {
+    const { text } = await loadPrompt('');
+
+    expect(text).toContain('release: { tag, previousTag, name, prerelease, hasChangeList }');
+    expect(text).toContain("4. `## Changes by area`: only when `release` is null or `release.hasChangeList` is false, because otherwise GitHub's list follows these notes.");
+  });
+
+  it('tells the model to size up the release before choosing the shape of the notes', async () => {
+    const { text } = await loadPrompt('');
+
+    expect(text).toContain('A major release, or any release that breaks existing code, is a migration.');
+    expect(text).toContain('A minor release adds features and fixes and usually asks nothing of users.');
+    expect(text).toContain('A patch release fixes things.');
+    expect(text).toContain("Match the examples' voice and formatting, and follow the shape of the one closer to this release.");
   });
 
   it('fetches the prompt from the url with a timeout', async () => {
@@ -158,5 +175,58 @@ describe('loadPrompt', () => {
 
     expect(result).toEqual({ error: `Failed to fetch prompt from ${PROMPT_URL} after 3 attempts: no response within 30s. ${HINT}` });
     expect(fetchMock).toHaveBeenCalledTimes(3);
+  });
+});
+
+// The worked examples teach the model what to write, so they have to be notes that Nuntia would publish exactly as they are.
+describe("the bundled prompt's worked examples", () => {
+  async function examples(): Promise<{ major: string; minor: string }> {
+    const { text } = await loadPrompt('');
+    const notes = [...text.matchAll(/^=== EXAMPLE NOTES ===\n([\s\S]*?)\n=== END OF EXAMPLE NOTES ===$/gm)].map(match => match[1]!);
+    if (notes.length !== 2) throw new Error(`The bundled prompt should have a major and a minor example, but has ${notes.length}.`);
+    return { major: notes[0]!, minor: notes[1]! };
+  }
+
+  function highlights(notes: string): string[] {
+    return (notes.split('## Highlights\n')[1]?.split(/^## /m)[0] ?? '').split('\n').filter(line => line.startsWith('- '));
+  }
+
+  it('come through cleaning unchanged', async () => {
+    for (const notes of Object.values(await examples())) expect(sanitizeNotes(notes, 'MudBlazor', 'MudBlazor')).toBe(notes);
+  });
+
+  it("are shaped for a published release that already has GitHub's list", async () => {
+    for (const notes of Object.values(await examples())) {
+      expect(notes).not.toMatch(/^# /m);
+      expect(notes).not.toContain('## Changes by area');
+    }
+  });
+
+  it('show a major release as a headline, 2-4 highlights and numbered migration steps', async () => {
+    const { major } = await examples();
+
+    expect(major).not.toMatch(/^#/);
+    expect(highlights(major).length).toBeGreaterThanOrEqual(2);
+    expect(highlights(major).length).toBeLessThanOrEqual(4);
+    expect(major).toMatch(/^1\. /m);
+  });
+
+  it('show a minor release as 1-3 highlights and upgrading bullets, with no headline', async () => {
+    const { minor } = await examples();
+
+    expect(minor).toMatch(/^## Highlights\n/);
+    expect(highlights(minor).length).toBeGreaterThanOrEqual(1);
+    expect(highlights(minor).length).toBeLessThanOrEqual(3);
+    expect(minor).not.toMatch(/^\d+\. /m);
+  });
+
+  it('end every bullet and step with links to its pull requests or issues', async () => {
+    const reference = String.raw`\[#\d+\]\(https://github\.com/MudBlazor/MudBlazor/(?:pull|issues)/\d+\)`;
+    for (const notes of Object.values(await examples())) {
+      const items = notes.split('\n').filter(line => /^(?:- |\d+\. )/.test(line));
+
+      expect(items.length).toBeGreaterThan(0);
+      for (const item of items) expect(item).toMatch(new RegExp(String.raw`\(${reference}(?:, ${reference})*\)$`));
+    }
   });
 });

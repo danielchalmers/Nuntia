@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import * as core from '@actions/core';
 import type { GitHubClient } from '../src/github';
-import { MAX_RELEASE_BODY_LENGTH, NOTES_END, NOTES_START, spliceNotes, writeToRelease } from '../src/publish';
+import { MAX_RELEASE_BODY_LENGTH, NOTES_END, NOTES_START, hasGeneratedNotes, spliceNotes, writeToRelease } from '../src/publish';
 
 vi.mock('@actions/core', async (importActual) => ({
   ...(await importActual<typeof import('@actions/core')>()),
@@ -19,6 +19,24 @@ const SECTION = '## Highlights\n\n- **Faster.** Pages load sooner.\n';
 function block(section: string): string {
   return `${NOTES_START}\n\n${section.trim()}\n\n${NOTES_END}`;
 }
+
+describe('hasGeneratedNotes', () => {
+  it("finds GitHub's generated notes by their comment or by the What's Changed heading", () => {
+    expect(hasGeneratedNotes(GENERATED)).toBe(true);
+    expect(hasGeneratedNotes(`${NOTE}\r\n\r\n${GENERATED.slice(GENERATED.indexOf("## What's Changed"))}`)).toBe(true);
+    expect(hasGeneratedNotes(`${block(SECTION)}\n\n${GENERATED}`)).toBe(true);
+  });
+
+  it('finds none in a hand-written or empty body', () => {
+    expect(hasGeneratedNotes('Hand-written notes.\n\n**Full Changelog**: https://github.com/acme/widgets/compare/v1.0.0...v1.1.0')).toBe(false);
+    expect(hasGeneratedNotes("Mentions What's Changed in passing.")).toBe(false);
+    expect(hasGeneratedNotes('')).toBe(false);
+  });
+
+  it("ignores a What's Changed heading inside Nuntia's own section", () => {
+    expect(hasGeneratedNotes(`Hand-written notes.\n\n${block("## What's Changed\n\n- Faster.")}`)).toBe(false);
+  });
+});
 
 describe('spliceNotes', () => {
   it("inserts the section just before GitHub's generated notes, below text written above them", () => {

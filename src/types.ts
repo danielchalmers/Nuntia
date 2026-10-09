@@ -29,6 +29,8 @@ export type ReleaseInfo = {
   previousTag: string;
   name: string | null;
   prerelease: boolean;
+  // Whether the release body already has GitHub's generated list of changes, so the notes don't need to list them again.
+  hasChangeList: boolean;
 };
 
 // The commits a run covers: those after base, up to and including head.
