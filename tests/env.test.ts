@@ -28,7 +28,7 @@ beforeEach(() => {
   vi.stubEnv('OPENAI_BASE_URL', '');
   vi.stubEnv('GITHUB_REPOSITORY', 'acme/widgets');
   vi.stubEnv('GITHUB_HEAD_REF', '');
-  // On GitHub Actions the context loads the triggering event at import; replace it so the runner's own event can't leak in.
+  // tests/setup.ts leaves the context without an event and some tests change it, so each test starts from a known one.
   github.context.payload = {};
   github.context.eventName = 'push';
   github.context.ref = 'refs/heads/main';

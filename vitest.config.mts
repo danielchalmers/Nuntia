@@ -14,6 +14,11 @@ export default defineConfig({
   test: {
     globals: true,
     environment: 'node',
-    include: ['tests/**/*.test.ts']
+    include: ['tests/**/*.test.ts'],
+    setupFiles: ['tests/setup.ts'],
+    // Only a failing test prints its logs, and tests that check a log line spy on it.
+    silent: 'passed-only',
+    // The proxy test in tests/llm/chat.test.ts uses undici's EnvHttpProxyAgent on purpose, so its experimental warning is expected.
+    execArgv: ['--disable-warning=UNDICI-EHPA'],
   }
 });

@@ -28,7 +28,7 @@ Nuntia/
 ├── action.yml        # GitHub Action metadata
 ├── package.json      # Dependencies and scripts
 ├── tsconfig.json     # TypeScript configuration
-└── vitest.config.ts  # Test configuration
+└── vitest.config.mts # Test configuration
 ```
 
 ## Initial Setup
@@ -85,7 +85,9 @@ npm test
 
 - Tests use Vitest with Node.js environment
 - Test files: `tests/**/*.test.ts`
-- `vitest.config.ts` loads `.prompt` imports as text, matching the build, so tests see the bundled prompt
+- `vitest.config.mts` loads `.prompt` imports as text, matching the build, so tests see the bundled prompt
+- `tests/setup.ts` removes the `GITHUB_*`, `INPUT_*` and `RUNNER_*` variables before the test files load and before each test, so the runner's environment can't change a result. A test that needs one stubs it with `vi.stubEnv`.
+- Only failing tests print their logs (`silent: 'passed-only'`). A test that checks a log line spies on it, with `vi.spyOn(console, 'log')` or a mocked `@actions/core`.
 
 ## Shared Model Layer
 
