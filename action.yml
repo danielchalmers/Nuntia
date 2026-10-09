@@ -1,5 +1,5 @@
 name: "Nuntia"
-description: "Generate release notes and migration guides for each GitHub release, or preview the next one."
+description: "Write release notes and migration guides into each GitHub release, or preview the next one."
 author: "Daniel Chalmers"
 branding:
   color: "green"
@@ -14,14 +14,6 @@ inputs:
     description: "Model. Blank uses the default for the API key you set (gemini-flash-latest for GEMINI_API_KEY, claude-sonnet-5-5 for ANTHROPIC_API_KEY, gpt-6.1-sol for OPENAI_API_KEY)."
     required: false
     default: ""
-
-outputs:
-  release-notes-path:
-    description: "Filesystem path to the generated release notes markdown."
-  input-tokens:
-    description: "Prompt tokens, cached tokens included, as the provider counts them."
-  output-tokens:
-    description: "Generated tokens, reasoning excluded, as the provider counts them."
 
 runs:
   using: "node24"

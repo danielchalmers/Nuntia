@@ -233,6 +233,26 @@ export class GitHubClient {
     return typeof name === 'string' && name ? name : undefined;
   }
 
+  /** The id and current body of the published release for a tag, or undefined when the tag has none. */
+  async readReleaseBody(tag: string): Promise<{ id: number; body: string } | undefined> {
+    this.incrementApiCalls();
+    let data: any;
+    try {
+      ({ data } = await this.octokit.rest.repos.getReleaseByTag({ owner: this.owner, repo: this.repo, tag }));
+    } catch (error) {
+      if (httpStatus(error) === 404) return undefined;
+      throw error;
+    }
+    if (typeof data?.id !== 'number') throw new Error(`GitHub returned release ${tag} without an id.`);
+    return { id: data.id, body: typeof data.body === 'string' ? data.body : '' };
+  }
+
+  /** Replace a release's body, which needs contents: write. */
+  async updateReleaseBody(id: number, body: string): Promise<void> {
+    this.incrementApiCalls();
+    await this.octokit.rest.repos.updateRelease({ owner: this.owner, repo: this.repo, release_id: id, body });
+  }
+
   /**
    * The body GitHub would generate as release notes for a tag.
    * It changes nothing, but GitHub still requires contents: write for it.

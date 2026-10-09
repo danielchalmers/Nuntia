@@ -314,6 +314,36 @@ describe('GitHubClient releases', () => {
     expect(await client.findNewestTag()).toBeUndefined();
   });
 
+  it("reads a tag's release id and current body, and finds nothing on a 404", async () => {
+    const getReleaseByTag = mockResponses({ ...RELEASE_DATA, id: 42 }, { ...RELEASE_DATA, id: 43, body: null });
+    getReleaseByTag.mockRejectedValueOnce(httpError(404));
+    const client = makeClient({ repos: { getReleaseByTag } });
+
+    expect(await client.readReleaseBody('v1.1.0')).toEqual({ id: 42, body: RELEASE_DATA.body });
+    expect(await client.readReleaseBody('v1.1.0')).toEqual({ id: 43, body: '' });
+    expect(await client.readReleaseBody('v1.1.0')).toBeUndefined();
+    expect(getReleaseByTag).toHaveBeenCalledWith({ owner: 'acme', repo: 'widgets', tag: 'v1.1.0' });
+    expect(client.getApiCallCount()).toBe(3);
+  });
+
+  it('fails when a release comes back without an id, and passes on other failures', async () => {
+    const noId = makeClient({ repos: { getReleaseByTag: mockResponses(RELEASE_DATA) } });
+    const failing = makeClient({ repos: { getReleaseByTag: vi.fn().mockRejectedValue(httpError(500)) } });
+
+    await expect(noId.readReleaseBody('v1.1.0')).rejects.toThrow('GitHub returned release v1.1.0 without an id.');
+    await expect(failing.readReleaseBody('v1.1.0')).rejects.toThrow('HTTP 500');
+  });
+
+  it("replaces a release's body by its id", async () => {
+    const updateRelease = mockResponses({});
+    const client = makeClient({ repos: { updateRelease } });
+
+    await client.updateReleaseBody(42, 'New body');
+
+    expect(updateRelease).toHaveBeenCalledWith({ owner: 'acme', repo: 'widgets', release_id: 42, body: 'New body' });
+    expect(client.getApiCallCount()).toBe(1);
+  });
+
   it('returns the body of the release notes GitHub generates for a tag', async () => {
     const generateReleaseNotes = mockResponses({ name: 'v1.1.0', body: RELEASE_DATA.body });
     const client = makeClient({ repos: { generateReleaseNotes } });
