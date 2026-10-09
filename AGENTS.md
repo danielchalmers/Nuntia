@@ -4,7 +4,7 @@ This document provides comprehensive instructions for AI agents and developers w
 
 ## Project Overview
 
-Nuntia is a GitHub Action that generates release notes and migration guides for a GitHub release, or previews the next release's notes. It is built with TypeScript, requires Node.js 24+ for development, and runs on Node.js 24 in GitHub Actions.
+Nuntia is a GitHub Action that writes release notes and migration guides into a GitHub release, or previews the next release's notes. It is built with TypeScript, requires Node.js 24+ for development, and runs on Node.js 24 in GitHub Actions.
 
 ## Prerequisites
 
@@ -180,10 +180,13 @@ The action is defined in `action.yml` and runs from `dist/index.js`. Key points:
 - **Entry point**: `dist/index.js`
 - **Runtime**: Node.js 24 (specified in `action.yml`)
 - **Inputs**: Defined in `action.yml`. There are only `model` and `prompt-url`; the commit range comes from the release, and the context limits are constants in `src/context.ts`.
+- **Outputs**: none. The release body, the job summary and `artifacts/nuntia-release-notes.md` carry the notes.
 - **Commit range** (`src/release.ts`): a `release` event uses the release in its payload, and a `workflow_dispatch` on a tag reads that tag's release. Either way the base comes from the release body's `**Full Changelog**: …/compare/BASE...TAG` link, which must point at this repository and tag, with `POST generate-notes` as the fallback. A `/commits/TAG` link is a first release, which logs a notice and exits 0. Any other run is a preview from the latest release (or the newest tag by commit date) to `GITHUB_SHA`, and never calls generate-notes, because that needs `contents: write`. The range is base-exclusive, matching the compare API.
 - **Context size** (`src/context.ts`): following references stops once the run has made 300 GitHub API calls, counted by `GitHubClient`. A context over about 150k tokens (4 characters a token) is trimmed in order: the linked items found through other linked items, then the changed-file list, then shorter linked item bodies. The model receives the context as compact JSON.
 - **Default prompt**: `examples/Nuntia.prompt`, bundled into `dist/index.js` and used when `prompt-url` is blank. Editing it changes runtime output, so rebuild `dist/`.
 - **Prompt URL input**: `prompt-url` (optional) fetches a prompt to try without committing it, with a 30-second timeout and two retries. A prompt that still can't be fetched fails the run.
+- **Cleaning** (`src/sanitize.ts`): every run cleans the model's notes before they reach the notes file, the job summary or the release. It removes raw HTML, images and `nuntia:start`/`nuntia:end` markers, wraps @mentions and bare URLs outside the repository in backticks, and keeps only the text of links outside `github.com/{owner}/{repo}`. Fenced code and code spans are left as written. Syntax it can't parse is escaped rather than passed through.
+- **Writing into the release** (`src/publish.ts`): only for a published release (a `release` event or a dispatch on a tag), after the job summary is written. It reads the release again by tag, replaces the text between `<!-- nuntia:start -->` and `<!-- nuntia:end -->` or inserts that block just before GitHub's generated notes (or at the top), and saves it with `PATCH` when the body changed. A body over 125,000 characters, broken markers, a deleted release, and HTTP 404, 408, 429 or 5xx only warn. HTTP 401 or 403 fails the run, because the workflow is missing `contents: write`.
 - **Workspace**: the action reads everything through the GitHub API, so consumers need no checkout step.
 
 ## File Artifacts

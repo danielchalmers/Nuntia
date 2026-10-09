@@ -14,7 +14,7 @@ jobs:
   release-notes:
     runs-on: ubuntu-latest
     permissions:
-      contents: read
+      contents: write # Writes the notes into the release.
       issues: read
       pull-requests: read
     steps:

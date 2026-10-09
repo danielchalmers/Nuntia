@@ -89,6 +89,15 @@ describe('loadPrompt', () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
+  it('tells the model, for a published release, to skip the H1 and leave out maintenance work', async () => {
+    const { text } = await loadPrompt('');
+
+    expect(text).toContain('When `release` is set, the notes are written into that release on GitHub, which already shows its title, so do not write an H1.');
+    expect(text).toContain(
+      'When `release` is set, leave out build, CI, documentation, test, dependency-update and refactoring work, and anything labeled `skip changelog`.'
+    );
+  });
+
   it('fetches the prompt from the url with a timeout', async () => {
     const fetchMock = stubFetch({ body: 'Test prompt content' });
 

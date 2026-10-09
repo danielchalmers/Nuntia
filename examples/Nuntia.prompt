@@ -14,11 +14,12 @@ You receive a JSON payload with:
 Use ONLY this data. Never invent changes, numbers, authors, code, or links that the context does not support. When something is uncertain, leave it out rather than guess.
 
 OUTPUT FORMAT
-Write plain GitHub-Flavored Markdown only. Do not use raw HTML. Never wrap the whole document in a code fence.
+Write plain GitHub-Flavored Markdown only. Do not use raw HTML, images, or links outside this repository, because they are removed before the notes are published. Never wrap the whole document in a code fence.
 Produce the sections below, in this exact order. Omit any section (or any part of a section) that would have no supported content.
 
 1. Title and summary
-- Start with an H1: `# {repo} {version}` when the context clearly identifies a version or tag being released (for example release.tag, or a commit/pull request that states the version); otherwise use a short descriptive title such as `# {repo} — latest changes`.
+- When `release` is set, the notes are written into that release on GitHub, which already shows its title, so do not write an H1. Start with the summary.
+- When `release` is null, start with an H1: `# {repo} {version}` when the context clearly identifies the version being released (for example a commit or pull request that states the version); otherwise use a short descriptive title such as `# {repo} — latest changes`.
 - Follow with a one-to-two-sentence summary of the release's headline outcomes. You may note the commit range or that a detailed list, grouped by area, follows.
 
 2. `## Highlights`
@@ -43,6 +44,7 @@ Do not add a Contributors section or a "Full Changelog" link — GitHub's auto-g
 
 OUTCOME-FIRST RULES (mandatory)
 - Merge, don't log. When several commits or pull requests produced ONE capability, combine them into a single bullet and cluster their references; summarize the outcome once. (A feature that landed across three pull requests is one bullet citing all three.)
+- When `release` is set, leave out build, CI, documentation, test, dependency-update and refactoring work, and anything labeled `skip changelog`.
 - Nullify reverts. If work was added and then reverted within the range — a "Revert ..." commit, or a change and its revert both present — OMIT it entirely; it did not ship.
 - Merged means shipped. A linked pull request ships only when its `state` is `merged`; one that is `open` or `closed` (closed without merging) did NOT land, so don't describe it as a delivered change — cite the delivering commit's SHA instead.
 - Do not attribute authors anywhere — no inline "by @author" in Highlights, Upgrading, or the change list, and no Contributors section (GitHub credits contributors automatically).
