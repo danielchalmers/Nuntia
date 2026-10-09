@@ -42,14 +42,8 @@ function mockResponses(...pages: unknown[]) {
   return fn;
 }
 
-function comparePage(total: number, mergeBase: string | undefined, commits: unknown[], files: unknown[] = []) {
-  return {
-    status: 'ahead',
-    total_commits: total,
-    ...(mergeBase !== undefined && { merge_base_commit: { sha: mergeBase } }),
-    commits,
-    files,
-  };
+function comparePage(total: number, commits: unknown[], files: unknown[] = []) {
+  return { status: 'ahead', total_commits: total, commits, files };
 }
 
 // GitHubClient builds a real octokit in its constructor, so swap in a stub of just the endpoints under test.
@@ -95,151 +89,75 @@ describe('GitHubClient.compareCommits', () => {
     expect(client.getApiCallCount()).toBe(4);
   });
 
-  it('recovers the full range and confirms completion when the walk reaches the merge-base', async () => {
-    const total = 260; // compare caps at 250, so the range is recovered via list-commits
-    const baseCommit = makeCompareCommit(100000); // a sha outside the 0..399 range
-    const baseSha = baseCommit.sha;
+  it('pages past 250 commits to the end of a large range', async () => {
+    // Shaped like microsoft/vscode 1.93.0...1.95.0, which paged to all 2,077 commits: 20 full pages, then 77.
+    const total = 2077;
+    const pages = Array.from({ length: 21 }, (_, i) => comparePage(total, makePage(i * 100, Math.min(100, total - i * 100))));
+    const compareCommits = mockResponses(...pages);
 
+    const client = makeClient({ repos: { compareCommits } });
+    const result = await client.compareCommits('BASE', 'HEAD');
+
+    expect(compareCommits).toHaveBeenCalledTimes(21);
+    expect(result.totalCommits).toBe(2077);
+    expect(result.commits).toHaveLength(2077);
+    expect(result.commits[0].sha).toBe(makeCompareCommit(0).sha);
+    expect(result.commits[2076].sha).toBe(makeCompareCommit(2076).sha);
+  });
+
+  it('stops once total_commits is reached without fetching an empty trailing page', async () => {
     const compareCommits = mockResponses(
-      comparePage(total, baseSha, makePage(0, 100)),
-      comparePage(total, baseSha, makePage(100, 100)),
-      comparePage(total, baseSha, makePage(200, 50))
+      comparePage(300, makePage(0, 100)),
+      comparePage(300, makePage(100, 100)),
+      comparePage(300, makePage(200, 100))
     );
 
-    // Newest-first stream: 260 range commits (0..259), then the merge-base at index 260.
-    const listCommits = mockResponses(
-      makePage(0, 100),
-      makePage(100, 100),
-      [...makePage(200, 60), baseCommit, ...makePage(261, 39)]
-    );
-
-    const client = makeClient({ repos: { compareCommits, listCommits } });
+    const client = makeClient({ repos: { compareCommits } });
     const result = await client.compareCommits('BASE', 'HEAD');
 
     expect(compareCommits).toHaveBeenCalledTimes(3);
-    expect(listCommits).toHaveBeenCalledTimes(3);
-    expect(result.commits).toHaveLength(260);
-    expect(result.commitsTruncated).toBe(false); // merge-base reached, count matches
-    expect(result.filesTruncated).toBe(false);
-    expect(result.commits.some((c: any) => c.sha === baseSha)).toBe(false); // base excluded
-    // Reversed to oldest-first.
-    expect(result.commits[0].sha).toBe(makeCompareCommit(259).sha);
-    expect(result.commits[259].sha).toBe(makeCompareCommit(0).sha);
+    expect(result.commits).toHaveLength(300);
   });
 
-  it('flags truncation when the merge-base is never reached in the stream', async () => {
-    const total = 300;
+  it('returns the commits it got when compare comes back short of total_commits', async () => {
+    // The caller compares the count with total_commits and fails the run, so the client must not pad or trim the list.
     const compareCommits = mockResponses(
-      comparePage(total, 'DEADBEEF', makePage(0, 100)),
-      comparePage(total, 'DEADBEEF', makePage(100, 100)),
-      comparePage(total, 'DEADBEEF', makePage(200, 50))
+      comparePage(300, makePage(0, 100)),
+      comparePage(300, makePage(100, 100)),
+      comparePage(300, makePage(200, 50)),
+      comparePage(300, [])
     );
 
-    // The stream never contains the merge-base sha, so the walk stops on the scan bound.
-    const listCommits = mockResponses(makePage(0, 100), makePage(100, 100), makePage(200, 100), makePage(300, 100));
-
-    const client = makeClient({ repos: { compareCommits, listCommits } });
+    const client = makeClient({ repos: { compareCommits } });
     const result = await client.compareCommits('BASE', 'HEAD');
 
-    expect(result.commits).toHaveLength(300); // trimmed to the expected total (best effort)
-    expect(result.commitsTruncated).toBe(true); // unconfirmed -> flagged, not silently trusted
+    expect(compareCommits).toHaveBeenCalledTimes(4);
+    expect(result.totalCommits).toBe(300);
+    expect(result.commits).toHaveLength(250);
   });
 
   it('flags files truncation at the 300-file compare cap', async () => {
     const files = Array.from({ length: 300 }, (_, i) => ({ filename: `src/file${i}.ts` }));
-    const compareCommits = mockResponses(comparePage(2, 'BASE', makePage(0, 2), files));
-    const listCommits = vi.fn();
+    const compareCommits = mockResponses(comparePage(2, makePage(0, 2), files));
 
-    const client = makeClient({ repos: { compareCommits, listCommits } });
+    const client = makeClient({ repos: { compareCommits } });
     const result = await client.compareCommits('BASE', 'HEAD');
 
     expect(result.filesTruncated).toBe(true);
     expect(result.files).toHaveLength(300);
     expect(result.commits).toHaveLength(2);
-    expect(result.commitsTruncated).toBe(false); // 2 == total_commits, no commit cap hit
-    expect(listCommits).not.toHaveBeenCalled();
   });
 
-  it('caps and flags an overshoot when the merge-base is found beyond the expected total', async () => {
-    const total = 260;
-    const baseCommit = makeCompareCommit(100000);
-    const baseSha = baseCommit.sha;
-
-    const compareCommits = mockResponses(
-      comparePage(total, baseSha, makePage(0, 100)),
-      comparePage(total, baseSha, makePage(100, 100)),
-      comparePage(total, baseSha, makePage(200, 50))
-    );
-
-    // Non-linear: 300 commits sort ahead of the merge-base by date (base at stream index 300).
-    const listCommits = mockResponses(
-      makePage(0, 100),
-      makePage(100, 100),
-      makePage(200, 100),
-      [baseCommit, ...makePage(301, 99)]
-    );
-
-    const client = makeClient({ repos: { compareCommits, listCommits } });
-    const result = await client.compareCommits('BASE', 'HEAD');
-
-    expect(result.commits).toHaveLength(260); // capped to total_commits, not the 300 superset
-    expect(result.commitsTruncated).toBe(true); // overshoot -> unverified -> flagged
-    expect(result.commits.some((c: any) => c.sha === baseSha)).toBe(false);
-  });
-
-  it('resolves the merge-base via getCommit when the compare response omits it', async () => {
-    const total = 260;
-    const baseCommit = makeCompareCommit(100000);
-
-    // Compare response omits merge_base_commit / base_commit.
-    const compareCommits = mockResponses(
-      comparePage(total, undefined, makePage(0, 100)),
-      comparePage(total, undefined, makePage(100, 100)),
-      comparePage(total, undefined, makePage(200, 50))
-    );
-    const getCommit = vi.fn().mockResolvedValue({ data: baseCommit }); // resolves the canonical base sha
-    const listCommits = mockResponses(
-      makePage(0, 100),
-      makePage(100, 100),
-      [...makePage(200, 60), baseCommit, ...makePage(261, 39)]
-    );
-
-    const client = makeClient({ repos: { compareCommits, listCommits, getCommit } });
-    const result = await client.compareCommits('BASE', 'HEAD');
-
-    expect(getCommit).toHaveBeenCalledWith({ owner: 'acme', repo: 'widgets', ref: 'BASE' });
-    expect(result.commits).toHaveLength(260);
-    expect(result.commitsTruncated).toBe(false);
-  });
-
-  it('flags truncation when the merge-base cannot be resolved at all', async () => {
-    const total = 260;
-    const compareCommits = mockResponses(
-      comparePage(total, undefined, makePage(0, 100)),
-      comparePage(total, undefined, makePage(100, 100)),
-      comparePage(total, undefined, makePage(200, 50))
-    );
-    const getCommit = vi.fn().mockRejectedValue(new Error('Not Found'));
-    const listCommits = vi.fn();
-
-    const client = makeClient({ repos: { compareCommits, listCommits, getCommit } });
-    const result = await client.compareCommits('BASE', 'HEAD');
-
-    expect(result.commitsTruncated).toBe(true);
-    expect(result.commits).toHaveLength(250);
-    expect(listCommits).not.toHaveBeenCalled();
-  });
-
-  it('flags truncation when total_commits is missing and a full 250-commit cap was collected', async () => {
+  it('pages until a short page when total_commits is missing', async () => {
     const page = (commits: unknown[]) => ({ status: 'ahead', commits });
-    const compareCommits = mockResponses(page(makePage(0, 100)), page(makePage(100, 100)), page(makePage(200, 50)));
+    const compareCommits = mockResponses(page(makePage(0, 100)), page(makePage(100, 100)), page(makePage(200, 40)));
 
     const client = makeClient({ repos: { compareCommits } });
     const result = await client.compareCommits('BASE', 'HEAD');
 
+    expect(compareCommits).toHaveBeenCalledTimes(3);
     expect(result.totalCommits).toBeUndefined();
-    expect(result.commits).toHaveLength(250);
-    expect(result.commitsTruncated).toBe(true);
+    expect(result.commits).toHaveLength(240);
   });
 
   it('stops paginating when a page adds no new commits', async () => {
