@@ -42,6 +42,7 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.restoreAllMocks();
+  vi.unstubAllEnvs();
 });
 
 describe('parseFullChangelog', () => {
@@ -216,6 +217,20 @@ describe('resolveRange', () => {
   });
 
   describe('anywhere else', () => {
+    it('uses the CI debug base when one is set', async () => {
+      vi.stubEnv('NUNTIA_PREVIEW_BASE', 'debug-base');
+      const client = makeClient({ latest: makeRelease() });
+
+      const range = await resolve(client, {});
+
+      expect(range).toEqual({ base: 'debug-base', head: 'f00dfeed1234567890', branch: 'main', release: null });
+      expect(client.findLatestRelease).not.toHaveBeenCalled();
+      expect(client.findNewestTag).not.toHaveBeenCalled();
+      expect(console.log).toHaveBeenCalledWith(
+        'Preview of the next release: the commits after debug-base (the CI debug range limit) up to f00dfee on main.'
+      );
+    });
+
     it('previews the commits after the latest release up to the run commit', async () => {
       const client = makeClient({ latest: makeRelease() });
 

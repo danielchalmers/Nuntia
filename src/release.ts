@@ -101,8 +101,9 @@ async function releaseRange(gh: GitHubClient, release: ReleaseDetails, owner: st
 async function previewRange(gh: GitHubClient, trigger: Trigger): Promise<ReleaseRange | Skip> {
   if (!trigger.sha) throw new Error('GITHUB_SHA is not set, so there is no commit to preview the next release up to.');
 
-  let base = (await gh.findLatestRelease())?.tag;
-  let source = 'the latest release';
+  const debugBase = process.env.NUNTIA_PREVIEW_BASE?.trim();
+  let base = debugBase || (await gh.findLatestRelease())?.tag;
+  let source = debugBase ? 'the CI debug range limit' : 'the latest release';
   if (!base) {
     base = await gh.findNewestTag();
     source = 'the newest tag, because there is no published release';
