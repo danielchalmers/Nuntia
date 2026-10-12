@@ -22,9 +22,11 @@ const MAX_ITEM_LENGTH = 5000;
 // How many GitHub API calls a run may make, the release and compare reads included, before it stops following references.
 // GITHUB_TOKEN allows 1,000 requests an hour per repository, and the release's other workflows share them.
 const MAX_API_CALLS = 300;
-// A context estimated at more tokens than this, at 4 characters a token, is trimmed until it fits.
-const MAX_CONTEXT_TOKENS = 150_000;
-const CHARS_PER_TOKEN = 4;
+// A context longer than this many characters of compact JSON is trimmed until it fits.
+// That is about 150k tokens at the 2.4 characters a token measured on Claude for this JSON.
+const MAX_CONTEXT_CHARS = 360_000;
+// The log labels a size with a token count estimated at this many characters a token, while the budget itself stays in characters.
+const ESTIMATED_CHARS_PER_TOKEN = 2.4;
 // The shorter lengths linked item bodies are cut at in turn, once nothing else is left to trim.
 const SHORTER_BODY_LENGTHS = [2500, 1000, 500];
 
@@ -159,37 +161,42 @@ function truncateText(text: string, maxLength = MAX_ITEM_LENGTH): string {
 }
 
 // The model receives the context as compact JSON, so that is what gets measured.
-function estimateTokens(context: ReleaseContext): number {
-  return Math.ceil(JSON.stringify(context).length / CHARS_PER_TOKEN);
+function measureContext(context: ReleaseContext): number {
+  return JSON.stringify(context).length;
 }
 
-function formatTokens(tokens: number): string {
-  return `about ${Math.round(tokens / 1000)}k tokens`;
+function formatChars(chars: number): string {
+  return `${chars.toLocaleString('en-US')} characters`;
+}
+
+function formatCharsWithTokenEstimate(chars: number): string {
+  const tokens = Math.round(chars / ESTIMATED_CHARS_PER_TOKEN / 1000);
+  return `${formatChars(chars)} (an estimated ${tokens}k tokens at ${ESTIMATED_CHARS_PER_TOKEN} characters a token)`;
 }
 
 /**
- * Trim a context that is over MAX_CONTEXT_TOKENS, stopping as soon as it fits.
+ * Trim a context that is over MAX_CONTEXT_CHARS, stopping as soon as it fits.
  * It drops the linked items found through other linked items, then the changed-file list, and then cuts linked item bodies shorter.
  */
 function trimContext(context: ReleaseContext, deepItems: ReadonlySet<LinkedItem>): void {
-  let tokens = estimateTokens(context);
-  if (tokens <= MAX_CONTEXT_TOKENS) return;
-  console.log(`The release context is ${formatTokens(tokens)}, over the limit of ${formatTokens(MAX_CONTEXT_TOKENS)}, so it will be trimmed.`);
+  let chars = measureContext(context);
+  if (chars <= MAX_CONTEXT_CHARS) return;
+  console.log(`The release context is ${formatCharsWithTokenEstimate(chars)}, over the limit of ${formatChars(MAX_CONTEXT_CHARS)}, so it will be trimmed.`);
 
   const directItems = context.linkedItems.filter(item => !deepItems.has(item));
   if (directItems.length < context.linkedItems.length) {
     const dropped = context.linkedItems.length - directItems.length;
     context.linkedItems = directItems;
-    tokens = estimateTokens(context);
-    console.log(`Dropped ${dropped} linked item(s) found through other linked items, leaving ${formatTokens(tokens)}.`);
-    if (tokens <= MAX_CONTEXT_TOKENS) return;
+    chars = measureContext(context);
+    console.log(`Dropped ${dropped} linked item(s) found through other linked items, leaving ${formatChars(chars)}.`);
+    if (chars <= MAX_CONTEXT_CHARS) return;
   }
 
   if (context.range.changedFiles?.length) {
     delete context.range.changedFiles;
-    tokens = estimateTokens(context);
-    console.log(`Dropped the changed-file list, leaving ${formatTokens(tokens)}.`);
-    if (tokens <= MAX_CONTEXT_TOKENS) return;
+    chars = measureContext(context);
+    console.log(`Dropped the changed-file list, leaving ${formatChars(chars)}.`);
+    if (chars <= MAX_CONTEXT_CHARS) return;
   }
 
   for (const maxLength of SHORTER_BODY_LENGTHS) {
@@ -201,12 +208,12 @@ function trimContext(context: ReleaseContext, deepItems: ReadonlySet<LinkedItem>
       }
     }
     if (cut === 0) continue;
-    tokens = estimateTokens(context);
-    console.log(`Cut the bodies of ${cut} linked item(s) at ${maxLength.toLocaleString('en-US')} characters, leaving ${formatTokens(tokens)}.`);
-    if (tokens <= MAX_CONTEXT_TOKENS) return;
+    chars = measureContext(context);
+    console.log(`Cut the bodies of ${cut} linked item(s) at ${maxLength.toLocaleString('en-US')} characters, leaving ${formatChars(chars)}.`);
+    if (chars <= MAX_CONTEXT_CHARS) return;
   }
 
-  core.warning(`The release context is still ${formatTokens(tokens)} after trimming, so the model may not accept it.`);
+  core.warning(`The release context is still ${formatCharsWithTokenEstimate(chars)} after trimming, so the model may not accept it.`);
 }
 
 /** Gather the commits after range.base up to range.head, and the issues, pull requests and commits they reference. */
@@ -299,13 +306,6 @@ export async function buildReleaseContext(cfg: Config, releaseRange: ReleaseRang
     );
   }
 
-  // The changed-file list is secondary context (notes are driven by commits/PRs), so a capped list is a non-fatal warning rather than a hard failure.
-  if (filesTruncated) {
-    core.warning(
-      `Changed-file list hit GitHub's 300-file compare cap; the release context includes only a partial file list. Commit and pull-request content is complete.`
-    );
-  }
-
   const range: ReleaseContext['range'] = {
     base,
     head,
@@ -336,5 +336,13 @@ export async function buildReleaseContext(cfg: Config, releaseRange: ReleaseRang
     linkedItems: Array.from(linkedItems.values()),
   };
   trimContext(context, deepItems);
+
+  // The changed-file list is secondary context (notes are driven by commits/PRs), so a capped list is a non-fatal warning rather than a hard failure.
+  // Trimming may have dropped the list, and then there is no partial list left to warn about.
+  if (filesTruncated && context.range.changedFiles) {
+    core.warning(
+      `Changed-file list hit GitHub's 300-file compare cap; the release context includes only a partial file list. Commit and pull-request content is complete.`
+    );
+  }
   return context;
 }

@@ -393,8 +393,8 @@ describe('buildReleaseContext', () => {
 });
 
 describe('buildReleaseContext limits', () => {
-  // 150k tokens at 4 characters a token.
-  const MAX_CONTEXT_CHARS = 600_000;
+  // The budget in characters of compact JSON, about 150k tokens at 2.4 characters a token.
+  const MAX_CONTEXT_CHARS = 360_000;
 
   function range(from: number, count: number) {
     return Array.from({ length: count }, (_, i) => from + i);
@@ -460,6 +460,26 @@ describe('buildReleaseContext limits', () => {
     expect(logLines().some(line => /trimmed|Dropped|Cut/.test(line))).toBe(false);
   });
 
+  it('trims a context once it is over 360,000 characters, and not before', async () => {
+    // One changed file whose name pads the context to exactly `length` characters.
+    async function buildWithLength(length: number) {
+      const unpadded = JSON.stringify(await build(makeClient({ compare: { files: [''] } }))).length;
+      return build(makeClient({ compare: { files: ['f'.repeat(length - unpadded)] } }));
+    }
+
+    const atLimit = await buildWithLength(MAX_CONTEXT_CHARS);
+    expect(JSON.stringify(atLimit).length).toBe(MAX_CONTEXT_CHARS);
+    expect(atLimit.range.changedFiles).toHaveLength(1);
+    expect(logLines()).toEqual([]);
+
+    const overLimit = await buildWithLength(MAX_CONTEXT_CHARS + 1);
+    expect(overLimit.range).not.toHaveProperty('changedFiles');
+    expect(logLines()).toEqual([
+      'The release context is 360,001 characters (an estimated 150k tokens at 2.4 characters a token), over the limit of 360,000 characters, so it will be trimmed.',
+      expect.stringMatching(/^Dropped the changed-file list, leaving [\d,]+ characters\.$/),
+    ]);
+  });
+
   it('first drops the linked items found through other linked items', async () => {
     // Issues 1 to 120 are short, and each refers to one of the long issues 1001 to 1120.
     const gh = makeClient({
@@ -475,15 +495,17 @@ describe('buildReleaseContext limits', () => {
     expect(context.range.changedFiles).toEqual(['src/index.ts']);
     expect(JSON.stringify(context).length).toBeLessThanOrEqual(MAX_CONTEXT_CHARS);
     const lines = logLines();
-    expect(lines).toContainEqual(expect.stringMatching(/^The release context is about 1\d\dk tokens, over the limit of about 150k tokens, so it will be trimmed\.$/));
-    expect(lines).toContainEqual(expect.stringMatching(/^Dropped 120 linked item\(s\) found through other linked items, leaving about \d+k tokens\.$/));
+    expect(lines).toContainEqual(
+      expect.stringMatching(/^The release context is [\d,]+ characters \(an estimated \d+k tokens at 2\.4 characters a token\), over the limit of 360,000 characters, so it will be trimmed\.$/)
+    );
+    expect(lines).toContainEqual(expect.stringMatching(/^Dropped 120 linked item\(s\) found through other linked items, leaving [\d,]+ characters\.$/));
     expect(lines.some(line => /changed-file|Cut/.test(line))).toBe(false);
   });
 
-  it('then drops the changed-file list', async () => {
+  it('then drops the changed-file list, and does not warn that GitHub capped it', async () => {
     const files = range(1, 300).map(n => `src/${'nested/'.repeat(40)}file${n}.ts`);
     const gh = makeClient({
-      commits: range(1, 105).map(n => commitFixing([n])),
+      commits: range(1, 60).map(n => commitFixing([n])),
       compare: { files, filesTruncated: true },
       issue: issueLookup(() => ({ body: 'x'.repeat(5000) })),
     });
@@ -491,11 +513,13 @@ describe('buildReleaseContext limits', () => {
     const context = await build(gh);
 
     expect(context.range).not.toHaveProperty('changedFiles');
-    expect(context.linkedItems).toHaveLength(105);
+    expect(context.linkedItems).toHaveLength(60);
     expect(context.linkedItems.every(item => item.body?.length === 5000)).toBe(true);
     expect(JSON.stringify(context).length).toBeLessThanOrEqual(MAX_CONTEXT_CHARS);
-    expect(logLines()).toContainEqual(expect.stringMatching(/^Dropped the changed-file list, leaving about \d+k tokens\.$/));
+    expect(logLines()).toContainEqual(expect.stringMatching(/^Dropped the changed-file list, leaving [\d,]+ characters\.$/));
     expect(logLines().some(line => /Cut/.test(line))).toBe(false);
+    // The list hit the 300-file compare cap, but no partial list is left to warn about.
+    expect(core.warning).not.toHaveBeenCalled();
   });
 
   it('last cuts linked item bodies shorter, until the context fits', async () => {
@@ -515,19 +539,21 @@ describe('buildReleaseContext limits', () => {
     expect(context.range).not.toHaveProperty('changedFiles');
     expect(JSON.stringify(context).length).toBeLessThanOrEqual(MAX_CONTEXT_CHARS);
     const lines = logLines();
-    expect(lines).toContainEqual(expect.stringMatching(/^Cut the bodies of 250 linked item\(s\) at 2,500 characters, leaving about \d+k tokens\.$/));
-    expect(lines).toContainEqual(expect.stringMatching(/^Cut the bodies of 250 linked item\(s\) at 1,000 characters, leaving about \d+k tokens\.$/));
+    expect(lines).toContainEqual(expect.stringMatching(/^Cut the bodies of 250 linked item\(s\) at 2,500 characters, leaving [\d,]+ characters\.$/));
+    expect(lines).toContainEqual(expect.stringMatching(/^Cut the bodies of 250 linked item\(s\) at 1,000 characters, leaving [\d,]+ characters\.$/));
     expect(lines.some(line => line.includes('at 500 characters'))).toBe(false);
     expect(core.warning).not.toHaveBeenCalled();
   });
 
   it('warns, and keeps the context, when trimming cannot make it fit', async () => {
-    // Commit messages are never cut below 5,000 characters, so 130 of them are too large for any trimming.
-    const commits = range(1, 130).map(n => makeCommit({ sha: shaFor(n), message: 'x'.repeat(5000), url: '' }));
+    // Commit messages are never cut below 5,000 characters, so 80 of them are too large for any trimming.
+    const commits = range(1, 80).map(n => makeCommit({ sha: shaFor(n), message: 'x'.repeat(5000), url: '' }));
 
     const context = await build(makeClient({ commits }));
 
-    expect(context.commits).toHaveLength(130);
-    expect(core.warning).toHaveBeenCalledWith(expect.stringMatching(/^The release context is still about 1\d\dk tokens after trimming, so the model may not accept it\.$/));
+    expect(context.commits).toHaveLength(80);
+    expect(core.warning).toHaveBeenCalledWith(
+      expect.stringMatching(/^The release context is still [\d,]+ characters \(an estimated \d+k tokens at 2\.4 characters a token\) after trimming, so the model may not accept it\.$/)
+    );
   });
 });

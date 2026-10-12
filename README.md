@@ -71,7 +71,7 @@ jobs:
 - Reads the commit messages and follows the issues, pull requests and commits they reference: up to 5 for each commit and 2 levels deep, with each message, title and body cut at 5,000 characters.
 - Keeps a very large release within bounds, so it gets less context:
   - It stops following references once the run has made 300 GitHub API calls, and the references found inside linked items are the first left out.
-  - If the context is still over about 150k tokens (at 4 characters a token), it drops the items found through other linked items, then the changed-file list, and then cuts linked issue and pull request bodies shorter until the context fits. The log names each step.
+  - If the context is still over 360,000 characters (about 150k tokens at the 2.4 characters a token measured on Claude), it drops the items found through other linked items, then the changed-file list, and then cuts linked issue and pull request bodies shorter until the context fits. The log names each step.
 - Sends the aggregated context to the model with the bundled prompt, or the one at `prompt-url` when it's set.
 - Cleans the notes and writes them into the release and the job summary (see [Writing into the release](#writing-into-the-release)). It also writes them, with payload and context debug files, to the `artifacts/` directory, which an `actions/upload-artifact` step with `path: artifacts` can keep.
 - Reads everything through the GitHub API, so the job needs no checkout step.
