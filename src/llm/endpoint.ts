@@ -20,7 +20,7 @@ export interface Endpoint {
   isDefault: boolean;
 }
 
-// In the order a blank model input picks a default from.
+// In the order error messages name their keys.
 const PROVIDERS: Record<ProviderId, { keyName: keyof ModelEnv; baseUrl: string; names?: RegExp }> = {
   gemini: { keyName: 'GEMINI_API_KEY', baseUrl: 'https://generativelanguage.googleapis.com/v1beta/openai', names: /^gemini-/i },
   anthropic: { keyName: 'ANTHROPIC_API_KEY', baseUrl: 'https://api.anthropic.com/v1', names: /^claude-/i },
@@ -57,7 +57,7 @@ function parseBaseUrl(value: string): URL {
 /**
  * Pick the endpoint for a model input from the API keys that are set, where OPENAI_BASE_URL counts as an OpenAI key.
  * With one key set, every model goes to it. With several, `gemini-*` and `claude-*` go to Gemini and Claude, and any other name goes to OpenAI.
- * A blank input uses the default for the first key set, in the order Gemini, Anthropic, OpenAI.
+ * A blank input uses the default for the key that is set, and is a configuration error when several are, because no key should win silently.
  */
 export function resolveModel(input: string, value: string | undefined, env: ModelEnv, defaults: Record<ProviderId, string>): Endpoint {
   const baseUrl = present(env.OPENAI_BASE_URL);
@@ -65,6 +65,10 @@ export function resolveModel(input: string, value: string | undefined, env: Mode
   if (keys.length === 0) throw new Error(NO_KEY);
 
   const named = value?.trim();
+  if (!named && keys.length > 1) {
+    const set = keys.map(id => present(env[PROVIDERS[id].keyName]) ? PROVIDERS[id].keyName : 'OPENAI_BASE_URL');
+    throw new Error(`Several API keys are set (${set.join(', ')}). Set ${input}, or map only one key.`);
+  }
   const provider = !named || keys.length === 1
     ? keys[0]!
     : keys.find(id => PROVIDERS[id].names?.test(named)) ?? keys.find(id => id === 'openai');
@@ -88,7 +92,7 @@ export function resolveModel(input: string, value: string | undefined, env: Mode
   };
 }
 
-// The startup log line for a pass, which names the host because it decides where the key and the issue text go.
+// Names the model and the host, because the host decides where the key and the issue text go.
 export function describeEndpoint(endpoint: Endpoint): string {
   return `${endpoint.model} at ${endpoint.host}${endpoint.isDefault ? ` (default for ${endpoint.keyName})` : ''}`;
 }

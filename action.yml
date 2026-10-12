@@ -11,7 +11,7 @@ inputs:
     required: false
     default: ""
   model:
-    description: "Model. Blank uses the default for the API key you set (gemini-flash-latest for GEMINI_API_KEY, claude-sonnet-5-5 for ANTHROPIC_API_KEY, gpt-6.1-sol for OPENAI_API_KEY)."
+    description: "Model. Blank uses the default for the API key you set (gemini-flash-latest for GEMINI_API_KEY, claude-sonnet-5-5 for ANTHROPIC_API_KEY, gpt-6.1-sol for OPENAI_API_KEY), and fails the run when you set several keys."
     required: false
     default: ""
 

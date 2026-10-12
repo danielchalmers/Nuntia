@@ -105,7 +105,8 @@ Set one model API key as a secret and map it in the step's `env`. Nuntia talks t
 
 These defaults favor quality over cost, because the notes come from one call per release and a person reviews them.
 
-- **With one key set**, `model` goes to it. With several, a `gemini-*` or `claude-*` model goes to Gemini or Claude when that key is set, and any other model goes to OpenAI or `OPENAI_BASE_URL`.
+- **With one key set**, `model` goes to it, and a blank `model` uses that key's default.
+- **With several keys set**, a `gemini-*` or `claude-*` model goes to Gemini or Claude when that key is set, and any other model goes to OpenAI or `OPENAI_BASE_URL`, which counts as a key here. A blank `model` fails the run as a configuration error, naming the keys it found, so no key wins silently. Set `model`, or map only one key.
 - **Any OpenAI-compatible service** (OpenRouter, Azure OpenAI, Groq, Mistral, xAI, DeepSeek, Together, Fireworks, Cerebras, LiteLLM, vLLM, Ollama, ...) works by setting `OPENAI_BASE_URL` to its API base and `model` to a model it serves, such as `anthropic/claude-sonnet-5.5` on OpenRouter.
 - **A `model` input passed through from `workflow_dispatch`** keeps sending its default after you switch keys. Give that input a default of `""` and set `required: false`, so the default for the key you set is used.
 - **The log names the model and host**, such as `Model: claude-sonnet-5-5 at api.anthropic.com (default for ANTHROPIC_API_KEY)`, and after the call, how long it took and the tokens it used.
@@ -118,4 +119,4 @@ These defaults favor quality over cost, because the notes come from one call per
 | Input | Purpose | Default |
 | --- | --- | --- |
 | `prompt-url` | Raw URL of a prompt to try instead of the bundled one, such as a gist (see [Prompt](#prompt)). | Blank, which uses the [bundled prompt](./examples/Nuntia.prompt) |
-| `model` | Model that writes the notes. | The default for the API key you set (see [Models](#models)) |
+| `model` | Model that writes the notes. Set it when you map more than one API key. | The default for the API key you set (see [Models](#models)) |
