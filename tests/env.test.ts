@@ -1,3 +1,4 @@
+import * as fs from 'fs';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => ({
@@ -197,5 +198,23 @@ describe('getConfig', () => {
     setInputs({ 'prompt-url': promptUrl });
 
     expect(() => getConfig()).toThrow(`prompt-url must be an http or https URL, or blank to use the bundled prompt: ${promptUrl}`);
+  });
+});
+
+// CI runs dist/index.js directly instead of through action.yml, so these keep action.yml in step with the code.
+describe('action.yml', () => {
+  const actionYml = fs.readFileSync(new URL('../action.yml', import.meta.url), 'utf8').replace(/\r\n/g, '\n');
+
+  it('declares exactly the inputs getConfig reads', () => {
+    const inputs = /^inputs:\n([\s\S]*?)^\S/m.exec(actionYml)?.[1] ?? '';
+    const declared = [...inputs.matchAll(/^  ([\w-]+):/gm)].map(([, name]) => name);
+
+    getConfig();
+
+    expect(mocks.getInput.mock.calls.map(([name]) => name).sort()).toEqual(declared.sort());
+  });
+
+  it('runs dist/index.js on Node 24', () => {
+    expect(actionYml).toMatch(/^runs:\n  using: "node24"\n  main: "dist\/index\.js"$/m);
   });
 });

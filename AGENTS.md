@@ -64,6 +64,8 @@ Unit tests mock GitHub and `fetch`, and model calls go to local stand-in servers
 - `npm run clean` - Remove the dist directory
 - `npm test` - Run all tests once
 - `npm run test:watch` - Run tests in watch mode
+- `npm run check:dist` - Fail if `dist/` has changes that aren't committed
+- `npm run verify` - Run both type-checks, the tests, the build and `check:dist` in order, as CI does
 
 ### TypeScript Development
 
@@ -147,16 +149,18 @@ Before committing changes, ensure:
 4. ✅ **dist is up to date**: Commit any changes in `dist/` folder
 5. ✅ **No uncommitted changes in dist**: `git status` shows clean dist
 
+`npm run verify` runs these checks in order, as CI does.
+
 ## Continuous Integration
 
-The project uses GitHub Actions for CI (`.github/workflows/ci.yml`):
+CI is one workflow, `.github/workflows/ci.yml`, which runs on pushes to main and on every pull request, stacked ones included.
+A newer push to a pull request cancels that pull request's older run, and pushes to main never cancel each other.
 
-1. Installs dependencies with `npm ci`
-2. Runs type-checking
-3. Builds the project
-4. Verifies dist folder is up to date
-5. Runs a mock release-notes generation, which previews the next release: the commits after the latest release (or the newest tag) up to the CI commit
-6. Runs unit tests (separate workflow: `tests.yml`)
+1. The `build` job installs dependencies with `npm ci` and runs `npm run verify`.
+2. The `mock` job then writes release notes with Claude Haiku for a fixed past release, PRs #45 to #53 (`86c7d7a...2fb4038`), by running `dist/index.js` with a synthetic `release` event, and uploads `artifacts/`. The range never grows, so each run costs about 17 GitHub API calls and 26K input tokens.
+   - Its permissions are read-only, so it can't write into a release. No release has that tag, so each run ends with one expected warning that the release no longer exists.
+   - Fork pull requests skip it, because they get no secrets.
+   - It runs the bundle directly, so it exercises neither `action.yml` nor the preview path. `tests/env.test.ts` checks `action.yml`'s inputs and entry point, and `tests/release.test.ts` covers the preview.
 
 ## Common Tasks
 
