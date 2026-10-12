@@ -8,8 +8,12 @@ on:
 
 permissions:
   contents: read
-  issues: read
-  pull-requests: read
+
+# A newer push to a pull request cancels its older run, because restacking a stack pushes each branch two or three times within seconds.
+# Pushes to main each get their own group, so they never cancel each other.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: true
 
 jobs:
   build:
@@ -22,23 +26,52 @@ jobs:
           cache: npm
       - name: Install dependencies
         run: npm ci
-      - name: Typecheck
-        run: npm run typecheck
-      - name: Build
-        run: npm run build
-      - name: Verify dist/ is up to date
-        run: npm run check:dist
-      # Outside a release, Nuntia previews the next release: the commits after the latest release (or the newest tag) up to this commit.
-      - name: Mock release notes
-        uses: ./
+      # Type-checks the source and the tests, runs the unit tests, builds, and fails if the committed dist/ differs from the build.
+      - name: Verify
+        run: npm run verify
+
+  # The mock writes notes for the same past release every time, PRs #45 to #53, so the range never grows and each run costs about 17 GitHub API calls and 26K input tokens.
+  # It runs after build, so a superseded run is cancelled before the mock spends any GitHub API calls.
+  # Fork pull requests get no secrets, so they skip it instead of failing on a missing key.
+  mock:
+    needs: build
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    # Read-only, so the mock can never write into a release.
+    permissions:
+      contents: read
+      issues: read
+      pull-requests: read
+    # Just over the model call's own 15-minute limit, so a GitHub quota wait can't hold the job for an hour.
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
-          model: claude-haiku-5-5
+          node-version: 24
+      # The bundle runs as it would for a release event, with the range taken from the release's Full Changelog link.
+      # GitHub ignores its default GITHUB_* variables in a step's env, so the event name and path are set on the command.
+      # No release has the head commit as its tag, so writing into the release only warns that it no longer exists.
+      - name: Mock release notes
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          INPUT_MODEL: claude-haiku-5-5
+        run: |
+          base=86c7d7a4b80dede6c92190ee785b189a5133faec
+          head=2fb403810cffc6e5e08a1ced7902af9f5f3fb236
+          cat > "$RUNNER_TEMP/release.json" <<EOF
+          {"release": {
+            "tag_name": "$head",
+            "target_commitish": "main",
+            "body": "**Full Changelog**: https://github.com/$GITHUB_REPOSITORY/compare/$base...$head"
+          }}
+          EOF
+          GITHUB_EVENT_NAME=release GITHUB_EVENT_PATH="$RUNNER_TEMP/release.json" node dist/index.js
       - name: Upload artifacts
+        if: always()
         uses: actions/upload-artifact@v7
         with:
           name: ci-${{ github.run_number }}
           path: artifacts
-          if-no-files-found: error
+          if-no-files-found: ignore
