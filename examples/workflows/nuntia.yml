@@ -18,7 +18,7 @@ jobs:
       issues: read
       pull-requests: read
     steps:
-      - uses: danielchalmers/Nuntia@main
+      - uses: danielchalmers/Nuntia@v2
         with:
           prompt-url: ${{ inputs.prompt-url }}
         env:
