@@ -1,4 +1,4 @@
-import { httpStatus, type GitHubClient, type ReleaseDetails } from './github';
+import { httpStatus, isRateLimited, type GitHubClient, type ReleaseDetails } from './github';
 import { hasGeneratedNotes } from './publish';
 import type { ReleaseRange, Trigger } from './types';
 
@@ -56,7 +56,8 @@ async function generateReleaseNotes(gh: GitHubClient, owner: string, repo: strin
   try {
     return await gh.generateReleaseNotes(tag);
   } catch (error) {
-    if (httpStatus(error) !== 403) throw error;
+    // A rate-limited 403 is GitHub's limit, not a missing permission.
+    if (httpStatus(error) !== 403 || isRateLimited(error)) throw error;
     throw new Error(
       `Release ${tag} has no Full Changelog link, and asking GitHub to generate one needs permissions: contents: write. ` +
         `Grant that permission, or add a "**Full Changelog**: https://github.com/${owner}/${repo}/compare/PREVIOUS...${tag}" line to the release.`

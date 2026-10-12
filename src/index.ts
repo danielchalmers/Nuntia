@@ -2,20 +2,27 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as core from '@actions/core';
 import { getConfig } from './env';
-import { GitHubClient } from './github';
+import { GitHubClient, isRateLimited, isTransientFailure } from './github';
 import { buildReleaseContext } from './context';
 import { buildPrompt, loadPrompt } from './prompt';
 import { writeToRelease } from './publish';
 import { resolveRange } from './release';
 import { sanitizeNotes } from './sanitize';
-import { ChatClient, ModelError, type Usage } from './llm/chat';
+import { ChatClient, ModelError, errorMessage, type Usage } from './llm/chat';
 import { describeEndpoint } from './llm/endpoint';
+import type { ReleaseContext, ReleaseRange } from './types';
 
 /** Write a file to the artifacts directory under the working directory. */
 function writeArtifact(name: string, contents: string): void {
   const filePath = path.join(process.cwd(), 'artifacts', name);
   fs.mkdirSync(path.dirname(filePath), { recursive: true });
   fs.writeFileSync(filePath, contents, 'utf8');
+}
+
+/** Stop without notes for a failure that a later run can get past, with the reason as a warning and in the job summary. */
+async function stopWithWarning(message: string): Promise<void> {
+  core.warning(message);
+  if (process.env.GITHUB_STEP_SUMMARY) await core.summary.addRaw(`${message}\n`).write();
 }
 
 async function run(): Promise<void> {
@@ -29,13 +36,25 @@ async function run(): Promise<void> {
   const prompt = await loadPrompt(cfg.promptUrl);
   console.log(`Prompt: ${prompt.source}`);
 
-  const range = await resolveRange(gh, cfg.trigger, cfg.owner, cfg.repo);
-  if ('skip' in range) {
-    core.notice(range.skip);
+  let range: ReleaseRange;
+  let context: ReleaseContext;
+  try {
+    const resolved = await resolveRange(gh, cfg.trigger, cfg.owner, cfg.repo);
+    if ('skip' in resolved) {
+      core.notice(resolved.skip);
+      return;
+    }
+    range = resolved;
+    context = await buildReleaseContext(cfg, range, gh);
+  } catch (err) {
+    // Without the release or its commits there is nothing to write notes from.
+    // GitHub being rate-limited or unavailable is GitHub's problem, so it only warns, while a rejected token, a missing permission or anything else fails the run.
+    if (!isTransientFailure(err)) throw err;
+    const reason = isRateLimited(err) ? "GitHub's API rate limit was reached. Re-run the job once it resets." : "GitHub couldn't be read. Re-run the job to try again.";
+    await stopWithWarning(`No release notes were written, because ${reason} GitHub said: ${errorMessage(err)}`);
     return;
   }
 
-  const context = await buildReleaseContext(cfg, range, gh);
   console.log(`Commit range resolved: ${context.range.totalCommits} commit(s), ${context.linkedItems.length} linked item(s).`);
   if (context.range.totalCommits === 0) {
     core.notice(`There are no commits after ${range.base} up to ${range.head}, so there are no release notes to write.`);
@@ -58,9 +77,7 @@ async function run(): Promise<void> {
     // Of the provider's failures, only a rejected key, an unknown model or a billing problem fails the run.
     // An outage, a timeout or a bad reply is the provider's problem, and a red run would notify the maintainer about it.
     if (!(err instanceof ModelError) || err.kind === 'fatal') throw err;
-    const message = `No release notes were written: ${err.message}`;
-    core.warning(message);
-    if (process.env.GITHUB_STEP_SUMMARY) await core.summary.addRaw(`${message}\n`).write();
+    await stopWithWarning(`No release notes were written: ${err.message}`);
     return;
   }
   const { text, inputTokens, outputTokens } = reply;

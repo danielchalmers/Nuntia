@@ -348,6 +348,33 @@ describe('buildReleaseContext', () => {
     }
   });
 
+  it("stops following references once GitHub's rate limit is reached, and warns once", async () => {
+    vi.mocked(core.warning).mockClear();
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const rateLimited = Object.assign(new Error('API rate limit exceeded for installation ID 1.'), {
+      status: 403,
+      response: { headers: { 'x-ratelimit-remaining': '0' } },
+    });
+    const getIssueOrPullRequest = vi.fn().mockRejectedValue(rateLimited);
+    const gh = makeClient({
+      commits: [makeCommit({ sha: 'a1b2c3d4e5f6', message: 'Fixes #1 and #2' }), makeCommit({ sha: 'b2c3d4e5f6a7', message: 'Fixes #3' })],
+      issue: getIssueOrPullRequest,
+    });
+
+    try {
+      const context = await build(gh);
+
+      expect(getIssueOrPullRequest).toHaveBeenCalledTimes(1);
+      expect(context.commits).toHaveLength(2);
+      expect(context.linkedItems).toEqual([]);
+      expect(core.warning).toHaveBeenCalledExactlyOnceWith(
+        "Stopped following references when GitHub's API rate limit was reached, leaving out 3 linked item(s), so the notes may miss some context."
+      );
+    } finally {
+      warnSpy.mockRestore();
+    }
+  });
+
   it('ignores references hidden in HTML comments and strips the comments from the context', async () => {
     const getIssueOrPullRequest = issuesByNumber({
       42: makeIssue({ body: 'Real body<!-- PR template: link #7 here -->' }),

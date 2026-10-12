@@ -42,7 +42,7 @@ jobs:
       contents: read
       issues: read
       pull-requests: read
-    # Just over the model call's own 15-minute limit, so a GitHub quota wait can't hold the job for an hour.
+    # Just over the model call's own 15-minute limit, so the timeout only ends a run that hangs.
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v7
