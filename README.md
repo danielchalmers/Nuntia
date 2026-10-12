@@ -76,6 +76,10 @@ jobs:
 - Sends the aggregated context to the model with the bundled prompt, or the one at `prompt-url` when it's set.
 - Cleans the notes and writes them into the release and the job summary (see [Writing into the release](#writing-into-the-release)). It also writes them, with payload and context debug files, to the `artifacts/` directory, which an `actions/upload-artifact` step with `path: artifacts` can keep.
 - Reads everything through the GitHub API, so the job needs no checkout step.
+- Waits out a GitHub rate limit only when it lifts within a minute, and at most three times for each request. A longer wait, such as for the hourly quota of `GITHUB_TOKEN` to reset, could hold the job for up to an hour, so the request fails instead.
+  - When a rate limit cuts short the references it follows, it warns and writes the notes from what it read before that.
+  - A rate limit or a GitHub outage while reading the release or its commits ends the run with a warning in the log and the job summary and no notes, without failing. Re-run the job once GitHub recovers.
+  - A rejected token or a missing permission still fails the run.
 
 ## Prompt
 

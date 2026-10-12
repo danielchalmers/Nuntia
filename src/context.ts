@@ -2,7 +2,7 @@ import * as core from '@actions/core';
 import type { CommitInfo, Config, LinkedItem, Reference, ReferenceSummary, ReferenceType, ReleaseContext, ReleaseRange } from './types';
 import { extractReferences, referenceKey, summarizeReferences } from './references';
 import type { CommitDetails, IssueOrPullDetails } from './github';
-import { GitHubClient } from './github';
+import { GitHubClient, isRateLimited } from './github';
 
 type QueueEntry = {
   ref: Reference;
@@ -254,8 +254,10 @@ export async function buildReleaseContext(cfg: Config, releaseRange: ReleaseRang
   const linkedItemCountsByRoot = new Map<string, number>();
   // The linked items found through another linked item, which trimming drops first.
   const deepItems = new Set<LinkedItem>();
-  // The references left unfetched once the API call budget ran out.
-  const overBudget = new Set<string>();
+  // The references left unfetched once the API call budget ran out, or once GitHub's rate limit was reached.
+  const leftOut = new Set<string>();
+  // Set by the first lookup that fails on a rate limit, because every lookup after it would fail the same way.
+  let rateLimited = false;
   let index = 0;
 
   while (index < queue.length) {
@@ -275,8 +277,8 @@ export async function buildReleaseContext(cfg: Config, releaseRange: ReleaseRang
     if (normalizedRef.type === 'commit' && knownCommits.has(normalizedRef.id.toLowerCase())) continue;
 
     // The queue holds every direct reference before any found inside a linked item, so those deeper references are the first left out when the budget runs out.
-    if (gh.getApiCallCount() >= MAX_API_CALLS) {
-      overBudget.add(key);
+    if (rateLimited || gh.getApiCallCount() >= MAX_API_CALLS) {
+      leftOut.add(key);
       continue;
     }
 
@@ -304,11 +306,17 @@ export async function buildReleaseContext(cfg: Config, releaseRange: ReleaseRang
       }
     } catch (error) {
       console.warn(`⚠️ Failed to resolve reference ${referenceKey(normalizedRef)}: ${getErrorMessage(error)}`);
+      if (isRateLimited(error)) {
+        rateLimited = true;
+        leftOut.add(key);
+      }
     }
   }
 
-  if (overBudget.size > 0) {
-    console.log(`Stopped following references at ${MAX_API_CALLS} GitHub API calls, leaving out ${overBudget.size} more.`);
+  if (rateLimited) {
+    core.warning(`Stopped following references when GitHub's API rate limit was reached, leaving out ${leftOut.size} linked item(s), so the notes may miss some context.`);
+  } else if (leftOut.size > 0) {
+    console.log(`Stopped following references at ${MAX_API_CALLS} GitHub API calls, leaving out ${leftOut.size} more.`);
   }
 
   // compareCommits pages until it has total_commits, so fewer commits means GitHub returned only part of the range.

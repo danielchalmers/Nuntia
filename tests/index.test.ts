@@ -302,6 +302,42 @@ describe('Nuntia action entry point', () => {
     expect(mocks.generateText).not.toHaveBeenCalled();
   });
 
+  it.each([
+    [
+      'reading the release hits an exhausted quota',
+      'resolveRange',
+      Object.assign(new Error('API rate limit exceeded for installation ID 1.'), { status: 403, response: { headers: { 'x-ratelimit-remaining': '0' } } }),
+      "GitHub's API rate limit was reached. Re-run the job once it resets.",
+    ],
+    ['comparing the commits gets a server error', 'buildReleaseContext', Object.assign(new Error('Bad Gateway'), { status: 502 }), "GitHub couldn't be read. Re-run the job to try again."],
+  ] as const)('only warns, in the log and the job summary, when %s', async (_name, step, error, reason) => {
+    vi.stubEnv('GITHUB_STEP_SUMMARY', path.join(tempDir, 'summary.md'));
+    mocks[step].mockRejectedValue(error);
+
+    await runAction();
+
+    const message = `No release notes were written, because ${reason} GitHub said: ${error.message}`;
+    expect(mocks.warning).toHaveBeenCalledWith(message);
+    expect(mocks.summary.addRaw).toHaveBeenCalledWith(`${message}\n`);
+    expect(mocks.summary.write).toHaveBeenCalled();
+    expect(mocks.setFailed).not.toHaveBeenCalled();
+    expect(mocks.generateText).not.toHaveBeenCalled();
+    expect(fs.existsSync(path.join(tempDir, 'artifacts'))).toBe(false);
+  });
+
+  it.each([
+    [401, 'Bad credentials'],
+    [403, 'Resource not accessible by integration'],
+  ])('fails when GitHub answers HTTP %i, because the token or its permissions are wrong', async (status, message) => {
+    mocks.resolveRange.mockRejectedValue(Object.assign(new Error(message), { status }));
+
+    await runAction();
+
+    expect(mocks.setFailed).toHaveBeenCalledWith(message);
+    expect(mocks.warning).not.toHaveBeenCalled();
+    expect(mocks.generateText).not.toHaveBeenCalled();
+  });
+
   it('logs how long the call took and the tokens used, with generated tokens excluding reasoning', async () => {
     await runAction();
 

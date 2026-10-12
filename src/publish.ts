@@ -1,5 +1,5 @@
 import * as core from '@actions/core';
-import { httpStatus, type GitHubClient } from './github';
+import { httpStatus, isTransientFailure, type GitHubClient } from './github';
 import { errorMessage } from './llm/chat';
 
 export const NOTES_START = '<!-- nuntia:start -->';
@@ -50,7 +50,7 @@ export function spliceNotes(body: string, section: string): string | undefined {
  * Write section into the published release for tag, changing only Nuntia's part of its body.
  * The release is read again first, because generating the notes takes minutes and people edit releases in the meantime.
  * A missing permission fails the run.
- * GitHub being unavailable, or a body Nuntia can't safely change, only warns, because the notes are already in the job summary.
+ * GitHub being unavailable or rate-limited, or a body Nuntia can't safely change, only warns, because the notes are already in the job summary.
  */
 export async function writeToRelease(gh: GitHubClient, tag: string, section: string): Promise<void> {
   try {
@@ -82,15 +82,16 @@ export async function writeToRelease(gh: GitHubClient, tag: string, section: str
     await gh.updateReleaseBody(release.id, body);
     console.log(`Wrote the notes into release ${tag}.`);
   } catch (error) {
+    // Transient failures are checked first, because GitHub reports some rate limits as a 403.
     const status = httpStatus(error);
+    if (status === 404 || isTransientFailure(error)) {
+      core.warning(`GitHub couldn't save the notes into release ${tag}, so they are only in the job summary. Re-run the job to try again. GitHub said: ${errorMessage(error)}`);
+      return;
+    }
     if (status === 401 || status === 403) {
       throw new Error(
         `Writing the notes into release ${tag} needs permissions: contents: write in the workflow. The notes are in the job summary. GitHub said: ${errorMessage(error)}`
       );
-    }
-    if (status === 404 || status === 408 || status === 429 || (status !== undefined && status >= 500)) {
-      core.warning(`GitHub couldn't save the notes into release ${tag}, so they are only in the job summary. Re-run the job to try again. GitHub said: ${errorMessage(error)}`);
-      return;
     }
     throw error;
   }

@@ -173,6 +173,16 @@ describe('writeToRelease', () => {
     );
   });
 
+  it("only warns when GitHub's rate limit stops the write, although GitHub reports it as a 403", async () => {
+    const rateLimited = Object.assign(httpError(403), { response: { headers: { 'x-ratelimit-remaining': '0' } } });
+    const client = makeClient({ id: 42, body: GENERATED }, rateLimited);
+
+    await expect(write(client)).resolves.toBeUndefined();
+    expect(core.warning).toHaveBeenCalledWith(
+      "GitHub couldn't save the notes into release v1.1.0, so they are only in the job summary. Re-run the job to try again. GitHub said: HTTP 403"
+    );
+  });
+
   it('only warns when reading the release fails on a server error', async () => {
     const client = makeClient(httpError(502));
 

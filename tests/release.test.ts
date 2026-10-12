@@ -174,6 +174,13 @@ describe('resolveRange', () => {
       );
     });
 
+    it('passes on a rate-limited 403 instead of blaming a missing permission', async () => {
+      const rateLimited = Object.assign(httpError(403, 'API rate limit exceeded for installation ID 1.'), { response: { headers: { 'x-ratelimit-remaining': '0' } } });
+      const client = makeClient({ generated: rateLimited });
+
+      await expect(resolve(client, { eventName: 'release', release: makeRelease({ body: '' }) })).rejects.toBe(rateLimited);
+    });
+
     it('passes on any other generate-notes failure', async () => {
       const client = makeClient({ generated: httpError(502, 'Bad Gateway') });
 
