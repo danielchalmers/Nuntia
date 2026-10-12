@@ -281,23 +281,54 @@ describe('buildReleaseContext', () => {
     expect(context.linkedItems[0]?.referencedBy).toEqual(['commit:a1b2c3d', 'commit:b2c3d4e']);
   });
 
-  it('merges an issue-style reference into the pull request it resolves to', async () => {
-    // "(#57)" is known to be a pull request; the later "#57" looks like an issue until the lookup reports a pull request.
-    const getIssueOrPullRequest = vi.fn().mockResolvedValue(
-      makeIssue({ number: 57, url: 'https://github.com/acme/widgets/pull/57', type: 'pull' })
-    );
+  // The second message guesses the other type, "#57" for an issue and "PR #57" for a pull request.
+  it.each([
+    ['a pull request later cited as an issue', 'pull', 'Ship the new inputs (#57)', 'Follow up on #57'],
+    ['an issue later cited as a pull request', 'issue', 'Fixes #57', 'Covered by PR #57 too'],
+  ] as const)('looks up %s once', async (_label, type, first, second) => {
+    const getIssueOrPullRequest = vi.fn().mockResolvedValue(makeIssue({ number: 57, type }));
     const gh = makeClient({
-      commits: [
-        makeCommit({ sha: 'a1b2c3d4e5f6', message: 'Ship the new inputs (#57)' }),
-        makeCommit({ sha: 'b2c3d4e5f6a7', message: 'Follow up on #57' }),
-      ],
+      commits: [makeCommit({ sha: 'a1b2c3d4e5f6', message: first }), makeCommit({ sha: 'b2c3d4e5f6a7', message: second })],
       issue: getIssueOrPullRequest,
     });
 
     const context = await build(gh);
 
+    expect(getIssueOrPullRequest).toHaveBeenCalledTimes(1);
     expect(context.linkedItems).toHaveLength(1);
-    expect(context.linkedItems[0]).toMatchObject({ type: 'pull', id: '57', referencedBy: ['commit:a1b2c3d', 'commit:b2c3d4e'] });
+    expect(context.linkedItems[0]).toMatchObject({ type, id: '57', referencedBy: ['commit:a1b2c3d', 'commit:b2c3d4e'] });
+  });
+
+  it('looks up an item once whatever the case of its owner and repository', async () => {
+    const getIssueOrPullRequest = vi.fn(async (owner: string, repo: string, number: number) => makeIssue({ owner, repo, number }));
+    const gh = makeClient({
+      commits: [makeCommit({ sha: 'a1b2c3d4e5f6', message: 'Ports other/lib#5' }), makeCommit({ sha: 'b2c3d4e5f6a7', message: 'Follow-up for Other/Lib#5' })],
+      issue: getIssueOrPullRequest,
+    });
+
+    const context = await build(gh);
+
+    expect(getIssueOrPullRequest).toHaveBeenCalledTimes(1);
+    expect(context.linkedItems[0]).toMatchObject({ owner: 'other', repo: 'lib', id: '5', referencedBy: ['commit:a1b2c3d', 'commit:b2c3d4e'] });
+  });
+
+  it('does not look up a reference again after it failed', async () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const getIssueOrPullRequest = issuesByNumber({});
+    const gh = makeClient({
+      commits: [makeCommit({ sha: 'a1b2c3d4e5f6', message: 'Fixes #404' }), makeCommit({ sha: 'b2c3d4e5f6a7', message: 'Follow-up for #404' })],
+      issue: getIssueOrPullRequest,
+    });
+
+    try {
+      const context = await build(gh);
+
+      expect(getIssueOrPullRequest).toHaveBeenCalledTimes(1);
+      expect(context.linkedItems).toEqual([]);
+      expect(warnSpy).toHaveBeenCalledTimes(1);
+    } finally {
+      warnSpy.mockRestore();
+    }
   });
 
   it('keeps building the context when a reference cannot be resolved', async () => {

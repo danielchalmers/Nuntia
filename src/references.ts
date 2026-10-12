@@ -2,12 +2,15 @@ import type { Reference, ReferenceSummary, ReferenceType } from './types';
 
 const ISSUE_URL = /https?:\/\/github\.com\/([A-Za-z0-9_.-]+)\/([A-Za-z0-9_.-]+)\/(issues|pull)\/(\d+)/gi;
 const COMMIT_URL = /https?:\/\/github\.com\/([A-Za-z0-9_.-]+)\/([A-Za-z0-9_.-]+)\/commit\/([a-f0-9]{7,40})/gi;
-const CROSS_REPO_ISSUE = /\b([A-Za-z0-9_.-]+)\/([A-Za-z0-9_.-]+)#(\d+)\b/g;
+// The owner can't follow a path character, so the end of a file path such as blob/HEAD/CHANGELOG.md#2113 isn't read as the repository HEAD/CHANGELOG.md.
+const CROSS_REPO_ISSUE = /(?<![A-Za-z0-9_.\/\\-])\b([A-Za-z0-9_.-]+)\/([A-Za-z0-9_.-]+)#(\d+)\b/g;
 const MERGE_PULL = /\bmerge pull request #(\d+)\b/gi;
 const EXPLICIT_PULL = /\b(?:pr|pull request)\s*#(\d+)\b/gi;
 const SUBJECT_PULL_SUFFIX = /\(#(\d+)\)\s*$/i;
-const SHORT_ISSUE = /(?<![A-Za-z0-9_\/])#(\d+)\b/g;
+// An & before the # makes it an HTML character reference such as &#64; or &#8203;, not an issue.
+const SHORT_ISSUE = /(?<![A-Za-z0-9_\/&])#(\d+)\b/g;
 const COMMIT_SHA = /\b[a-f0-9]{7,40}\b/gi;
+const ANY_URL = /https?:\/\/\S+/gi;
 
 function normalizeSha(sha: string): string {
   return sha.trim().toLowerCase();
@@ -110,8 +113,8 @@ export function extractReferences(
     });
   }
 
-  // Commit URLs are blanked out first so the SHAs inside them aren't matched again here as bare hex runs.
-  eachMatch(COMMIT_SHA, text.replace(COMMIT_URL, ' '), match => {
+  // URLs are blanked out first: the SHAs in commit URLs were matched above, and a SHA in any other link, such as a compare, blob or gist link, is part of that link's address rather than a commit the text refers to.
+  eachMatch(COMMIT_SHA, text.replace(ANY_URL, ' '), match => {
     let sha = normalizeSha(match[0]);
     if (!/[a-f]/i.test(sha)) return;
     // A bare short hex run is only trusted when it resolves to a commit already in the release range.
