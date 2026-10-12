@@ -7,7 +7,7 @@ const ANTHROPIC = 'https://api.anthropic.com/v1'
 const OPENAI = 'https://api.openai.com/v1'
 
 function resolve(value: string | undefined, env: ModelEnv) {
-  return resolveModel('model-pro', value, env, DEFAULTS)
+  return resolveModel('model', value, env, DEFAULTS)
 }
 
 describe('resolveModel', () => {
@@ -36,8 +36,13 @@ describe('resolveModel', () => {
     expect(resolve('gemini-3.5-flash', env)).toMatchObject({ provider: 'gemini', apiKey: 'g' })
     expect(resolve('claude-haiku-5-5', env)).toMatchObject({ provider: 'anthropic', apiKey: 'a' })
     expect(resolve('gpt-6-luna', env)).toMatchObject({ provider: 'openai', apiKey: 'o' })
-    expect(resolve('', env)).toMatchObject({ provider: 'gemini', model: 'gemini-default' })
-    expect(() => resolve('gpt-6-luna', { GEMINI_API_KEY: 'g', ANTHROPIC_API_KEY: 'a' })).toThrow('model-pro "gpt-6-luna" isn\'t a gemini-* or claude-* name, so it needs OPENAI_API_KEY or OPENAI_BASE_URL.')
+    expect(() => resolve('gpt-6-luna', { GEMINI_API_KEY: 'g', ANTHROPIC_API_KEY: 'a' })).toThrow('model "gpt-6-luna" isn\'t a gemini-* or claude-* name, so it needs OPENAI_API_KEY or OPENAI_BASE_URL.')
+  })
+
+  it('fails when the input is blank and several keys are set, naming each one, so no key wins silently', () => {
+    expect(() => resolve('', { GEMINI_API_KEY: 'g', ANTHROPIC_API_KEY: 'a' })).toThrow('Several API keys are set (GEMINI_API_KEY, ANTHROPIC_API_KEY). Set model, or map only one key.')
+    expect(() => resolve(' ', { ANTHROPIC_API_KEY: 'a', OPENAI_BASE_URL: 'https://openrouter.ai/api/v1' })).toThrow('Several API keys are set (ANTHROPIC_API_KEY, OPENAI_BASE_URL).')
+    expect(() => resolve(undefined, { GEMINI_API_KEY: 'g', OPENAI_API_KEY: 'o', OPENAI_BASE_URL: 'https://openrouter.ai/api/v1' })).toThrow('Several API keys are set (GEMINI_API_KEY, OPENAI_API_KEY).')
   })
 
   it('treats empty keys as absent, as a workflow triggered from a fork gets them', () => {
@@ -55,7 +60,7 @@ describe('resolveModel', () => {
     })
     expect(resolve('anthropic/claude-sonnet-5.5', { OPENAI_BASE_URL: 'https://openrouter.ai/api/v1', OPENAI_API_KEY: 'o', GEMINI_API_KEY: 'g' }))
       .toMatchObject({ baseUrl: 'https://openrouter.ai/api/v1', model: 'anthropic/claude-sonnet-5.5', apiKey: 'o' })
-    expect(() => resolve('', { OPENAI_BASE_URL: 'https://openrouter.ai/api/v1' })).toThrow('model-pro is blank, and OPENAI_BASE_URL has no default model.')
+    expect(() => resolve('', { OPENAI_BASE_URL: 'https://openrouter.ai/api/v1' })).toThrow('model is blank, and OPENAI_BASE_URL has no default model.')
   })
 
   it.each([

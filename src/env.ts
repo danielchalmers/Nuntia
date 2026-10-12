@@ -81,7 +81,7 @@ function readModelEnv(): ModelEnv {
 
 /**
  * Resolve runtime config.
- * Throws early with actionable messages if GITHUB_TOKEN is missing, no model API key is set, repo context is absent, prompt-url isn't a URL, or a release event has no release.
+ * Throws early with actionable messages if GITHUB_TOKEN is missing, no model API key is set, several are set while the model input is blank, repo context is absent, prompt-url isn't a URL, or a release event has no release.
  */
 export function getConfig(): Config {
   const token = process.env.GITHUB_TOKEN || '';

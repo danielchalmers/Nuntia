@@ -216,7 +216,7 @@ export class ChatClient {
     return {
       ...this.textBody({ ...request, userPrompt }),
       ...(this.dropped.has('response_format') ? {} : { response_format: { type: 'json_schema', json_schema: { name: 'response', strict: true, schema: request.schema } } }),
-      // Matches the HIGH thinking level the passes were tuned on.
+      // Matches the HIGH thinking level the prompts were tuned on.
       ...(this.dropped.has('reasoning_effort') ? {} : { reasoning_effort: 'high' }),
     };
   }

@@ -87,10 +87,17 @@ describe('getConfig', () => {
 
   it('masks every model API key that is set', () => {
     vi.stubEnv('ANTHROPIC_API_KEY', ' anthropic-key ');
+    setInputs({ model: 'claude-opus-5-5' });
 
     getConfig();
 
     expect(mocks.setSecret.mock.calls).toEqual([['gemini-key'], ['anthropic-key']]);
+  });
+
+  it('fails, naming the keys, when the model input is blank and several keys are set', () => {
+    vi.stubEnv('ANTHROPIC_API_KEY', 'anthropic-key');
+
+    expect(() => getConfig()).toThrow('Several API keys are set (GEMINI_API_KEY, ANTHROPIC_API_KEY). Set model, or map only one key.');
   });
 
   it('picks the provider from the model name when several keys are set', () => {
