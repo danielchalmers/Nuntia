@@ -30,7 +30,7 @@ jobs:
       - name: Verify
         run: npm run verify
 
-  # The mock writes notes for the same past release every time, PRs #45 to #53, so the range never grows and each run costs about 17 GitHub API calls and 26K input tokens.
+  # The mock writes notes for the same past release every time, PRs #45 to #53, so the range never grows and each run costs about 16 GitHub API calls and 26K input tokens.
   # It runs after build, so a superseded run is cancelled before the mock spends any GitHub API calls.
   # Fork pull requests get no secrets, so they skip it instead of failing on a missing key.
   mock:

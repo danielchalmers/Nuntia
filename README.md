@@ -47,7 +47,7 @@ jobs:
 
 ## Which commits
 
-- **A published release**, from the `release` event or from running the workflow on the release's tag, covers the commits after the previous release up to the release's tag. The previous release comes from the `**Full Changelog**: …/compare/PREVIOUS...TAG` line that **Generate release notes** adds to the release body. The previous release's own commit is left out, because it shipped in that release.
+- **A published release**, from the `release` event or from running the workflow on the release's tag, covers the commits after the previous release up to the release's tag. The previous release comes from the `**Full Changelog**: …/compare/PREVIOUS...TAG` line that **Generate release notes** adds to the release body, and a hand-written line works too, in any letter case. The previous release's own commit is left out, because it shipped in that release.
   - **No Full Changelog line.** Nuntia asks GitHub to generate release notes for the tag and reads the line from those. GitHub requires `contents: write` for that call, which the workflow already has for writing the notes.
   - **A first release** links to `/commits/TAG` instead, so there is nothing to compare it with. Nuntia logs a notice and stops without failing. To cover it anyway, add a Full Changelog line that compares it with an earlier tag, then run the workflow on the tag.
 - **Any other run**, such as running the workflow from a branch, previews the next release: the commits after the latest release, up to the run's commit. Without a published release it starts from the newest tag by commit date, and with no tags at all it logs a notice and stops. A preview never asks GitHub to generate release notes.
@@ -69,6 +69,7 @@ jobs:
 
 - Picks the release and the commits it covers (see [Which commits](#which-commits)).
 - Reads the commit messages and follows the issues, pull requests and commits they reference: up to 5 for each commit and 2 levels deep, with each message, title and body cut at 5,000 characters.
+  - Each item is looked up once, however often and however it's cited. HTML character references such as `&#8203;`, file paths such as `blob/HEAD/CHANGELOG.md#2113`, and SHAs inside links aren't read as references.
 - Keeps a very large release within bounds, so it gets less context:
   - It stops following references once the run has made 300 GitHub API calls, and the references found inside linked items are the first left out.
   - If the context is still over 360,000 characters (about 150k tokens at the 2.4 characters a token measured on Claude), it drops the items found through other linked items, then the changed-file list, and then cuts linked issue and pull request bodies shorter until the context fits. The log names each step.

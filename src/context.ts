@@ -93,6 +93,16 @@ function toLinkedIssue(details: IssueOrPullDetails, source: string, title: strin
   };
 }
 
+/**
+ * The key an item is looked up and stored under.
+ * Issues and pull requests share one set of numbers, and a reference can only guess which one it is, so their key leaves the type out.
+ * GitHub owner and repository names are case-insensitive.
+ */
+function itemKey(ref: Reference): string {
+  const repo = `${ref.owner}/${ref.repo}`.toLowerCase();
+  return ref.type === 'commit' ? `commit:${repo}@${ref.id.toLowerCase()}` : `${repo}#${ref.id}`;
+}
+
 function formatSource(type: ReferenceType, id: string): string {
   if (type === 'commit') return `commit:${id.slice(0, 7)}`;
   if (type === 'pull') return `pull:#${id}`;
@@ -120,7 +130,7 @@ async function resolveCommitReference(
   knownCommits.add(details.sha.toLowerCase());
   const message = stripMarkdownComments(details.message);
   return {
-    key: referenceKey({ ...ref, id: details.sha.toLowerCase() }),
+    key: itemKey({ ...ref, id: details.sha }),
     linked: toLinkedCommit(details, ref.owner, ref.repo, source, message),
     referenceText: message,
     sourceLabel: formatSource('commit', details.sha),
@@ -137,7 +147,7 @@ async function resolveIssueReference(
   const body = stripMarkdownComments(details.body || '');
   const linked = toLinkedIssue(details, source, title, body);
   return {
-    key: referenceKey({ type: details.type, owner: details.owner, repo: details.repo, id: String(details.number) }),
+    key: itemKey({ type: details.type, owner: details.owner, repo: details.repo, id: String(details.number) }),
     linked,
     referenceText: `${title}\n\n${body}`,
     sourceLabel: formatSource(linked.type, linked.id),
@@ -239,6 +249,8 @@ export async function buildReleaseContext(cfg: Config, releaseRange: ReleaseRang
   }
 
   const linkedItems = new Map<string, LinkedItem>();
+  // Every item a lookup has been spent on, including those that failed, so no item is looked up twice.
+  const lookedUp = new Set<string>();
   const linkedItemCountsByRoot = new Map<string, number>();
   // The linked items found through another linked item, which trimming drops first.
   const deepItems = new Set<LinkedItem>();
@@ -252,8 +264,9 @@ export async function buildReleaseContext(cfg: Config, releaseRange: ReleaseRang
     if (item.depth > MAX_REFERENCE_DEPTH) continue;
 
     const normalizedRef = normalizeCommitReference(item.ref, knownCommits);
-    const key = referenceKey(normalizedRef);
+    const key = itemKey(normalizedRef);
     if (mergeReferencedBy(linkedItems, key, item.source)) continue;
+    if (lookedUp.has(key)) continue;
 
     const linkedCountForRoot = linkedItemCountsByRoot.get(item.rootCommitSha) ?? 0;
     if (linkedCountForRoot >= MAX_LINKED_ITEMS) continue;
@@ -267,13 +280,14 @@ export async function buildReleaseContext(cfg: Config, releaseRange: ReleaseRang
       continue;
     }
 
+    lookedUp.add(key);
     try {
       const resolved =
         normalizedRef.type === 'commit'
           ? await resolveCommitReference(gh, normalizedRef, item.source, knownCommits)
           : await resolveIssueReference(gh, normalizedRef, item.source);
 
-      // Resolving can canonicalize the reference (a short sha to a full one, an issue number to a pull), so dedupe again on the resolved key.
+      // Resolving can turn a short sha into a full one, so dedupe again on the resolved key.
       if (mergeReferencedBy(linkedItems, resolved.key, item.source)) continue;
 
       const refs = extractReferences(resolved.referenceText, normalizedRef.owner, normalizedRef.repo, knownCommits)
@@ -289,7 +303,7 @@ export async function buildReleaseContext(cfg: Config, releaseRange: ReleaseRang
         }
       }
     } catch (error) {
-      console.warn(`⚠️ Failed to resolve reference ${key}: ${getErrorMessage(error)}`);
+      console.warn(`⚠️ Failed to resolve reference ${referenceKey(normalizedRef)}: ${getErrorMessage(error)}`);
     }
   }
 

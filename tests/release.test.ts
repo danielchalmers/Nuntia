@@ -55,6 +55,13 @@ describe('parseFullChangelog', () => {
     expect(parseFullChangelog(body, 'acme', 'widgets', 'v1.1.0')).toEqual({ base: 'v1.0.0' });
   });
 
+  it('reads a hand-written line in any letter case', () => {
+    const body = "## What's new\n- Faster scans\n\n**Full changelog**: https://github.com/acme/widgets/compare/v1.0.0...v1.1.0";
+
+    expect(parseFullChangelog(body, 'acme', 'widgets', 'v1.1.0')).toEqual({ base: 'v1.0.0' });
+    expect(parseFullChangelog(COMPARE_LINE.replace('Full Changelog', 'FULL CHANGELOG'), 'acme', 'widgets', 'v1.1.0')).toEqual({ base: 'v1.0.0' });
+  });
+
   it('marks a /commits/ link as a first release', () => {
     const body = '**Full Changelog**: https://github.com/acme/widgets/commits/v1.1.0';
 
@@ -122,6 +129,16 @@ describe('resolveRange', () => {
       const range = await resolve(client, { eventName: 'release', release: makeRelease({ body: `Hand-written notes.\n\n${COMPARE_LINE}` }) });
 
       expect(range).toMatchObject({ base: 'v1.0.0', release: { hasChangeList: false } });
+      expect(client.generateReleaseNotes).not.toHaveBeenCalled();
+    });
+
+    it('takes the range from a hand-written "Full changelog" line without asking GitHub to generate release notes', async () => {
+      const client = makeClient();
+      const body = 'Hand-written notes.\n\n**Full changelog**: https://github.com/acme/widgets/compare/v1.0.0...v1.1.0';
+
+      const range = await resolve(client, { eventName: 'release', release: makeRelease({ body }) });
+
+      expect(range).toMatchObject({ base: 'v1.0.0', head: 'v1.1.0' });
       expect(client.generateReleaseNotes).not.toHaveBeenCalled();
     });
 

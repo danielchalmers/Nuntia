@@ -65,6 +65,43 @@ Also mentioned: deadbeef1
     expect(toKeys(refs)).toEqual(['issue:other/lib#5']);
   });
 
+  it('does not read an HTML character reference as an issue', () => {
+    // Renovate puts &#8203; before each mention and upstream number in the release notes it quotes.
+    const text = 'Thanks &#64;alice. Fixed by [@&#8203;nohwnd](https://redirect.github.com/nohwnd) in [#&#8203;2019](https://redirect.github.com/coverlet-coverage/coverlet/pull/2019)';
+
+    expect(extractReferences(text, 'acme', 'widgets')).toEqual([]);
+    expect(toKeys(extractReferences(`${text}\nFixes #12 (#34).`, 'acme', 'widgets'))).toEqual(['issue:acme/widgets#12', 'issue:acme/widgets#34']);
+  });
+
+  it('does not read the end of a file path as a cross-repo reference', () => {
+    // From Renovate's release notes, where #2113 is the anchor of a changelog heading.
+    const text = [
+      '[Compare Source](https://redirect.github.com/bUnit-dev/bUnit/blob/HEAD/CHANGELOG.md#2113---2026-09-13)',
+      'https://github.com/sass/dart-sass/blob/HEAD/CHANGELOG.md#11050',
+      'See blob/HEAD/CHANGELOG.md#2113 and docs\\HEAD/CHANGELOG.md#7',
+    ].join('\n');
+
+    expect(extractReferences(text, 'acme', 'widgets')).toEqual([]);
+    expect(toKeys(extractReferences('Ported from other/lib#5 (see other/lib#6)', 'acme', 'widgets'))).toEqual([
+      'issue:other/lib#5',
+      'issue:other/lib#6',
+    ]);
+  });
+
+  it('does not read a SHA inside a link as a local commit', () => {
+    // A compare link from Renovate, a blob link to another repository and a gist file, all from MudBlazor pull request bodies.
+    const text = [
+      '### [`v10.11.0`](https://redirect.github.com/eslint/eslint/compare/v10.10.0...3c0b7c6e1fe2dec778b97a996018126f22d437ae)',
+      '- [QuickGrid](https://github.com/dotnet/aspnetcore/blob/4b58ad51259280e1340777513694f122501435ab/src/Components/QuickGrid)',
+      '![recording](https://gist.githubusercontent.com/roian6/61daeb09c914056fb1d9b7776d508331/raw/a8a52349ff3c201e523725b1056251c6bffe55e8/progress.gif)',
+    ].join('\n');
+
+    expect(extractReferences(text, 'acme', 'widgets')).toEqual([]);
+    expect(toKeys(extractReferences('Base: `0147a6c43c8ae584ee19cc2a0d77f8e61153a711`.', 'acme', 'widgets'))).toEqual([
+      'commit:acme/widgets#0147a6c43c8ae584ee19cc2a0d77f8e61153a711',
+    ]);
+  });
+
   it('only treats a trailing (#n) on the subject line as a pull request', () => {
     const refs = extractReferences('Tidy up\n\nMentioned in the thread (#8)', 'acme', 'widgets');
     expect(toKeys(refs)).toEqual(['issue:acme/widgets#8']);

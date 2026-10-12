@@ -8,7 +8,8 @@ export type Skip = { skip: string };
 // What a Full Changelog link says about the release before this one.
 export type ChangelogLink = { base: string } | { firstRelease: true };
 
-const FULL_CHANGELOG = /\*\*Full Changelog\*\*:\s*(\S+)/g;
+// Case-insensitive, because some releases are written by hand as "Full changelog".
+const FULL_CHANGELOG = /\*\*Full Changelog\*\*:\s*(\S+)/gi;
 
 function decodeRef(text: string): string | undefined {
   try {
