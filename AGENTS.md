@@ -1,248 +1,171 @@
 # AGENTS.md
 
-This document provides comprehensive instructions for AI agents and developers working on the Nuntia project. It outlines setup, development workflow, testing procedures, and build requirements.
+This file is the agent harness for Nuntia: the map, the constraints and the feedback loops an agent needs to make reliable changes.
+It follows OpenAI's harness engineering guidance, which holds that agents work best from repository-local knowledge, legible systems, enforced invariants and tight validation loops rather than a long manual.
+Keep this file the table of contents and the operating contract, and move a rule into a test, a script or CI once it is stable.
 
-## Project Overview
+Source: https://openai.com/index/harness-engineering/
 
-Nuntia is a GitHub Action that writes release notes and migration guides into a GitHub release, or previews the next release's notes. It is built with TypeScript, requires Node.js 24+ for development, and runs on Node.js 24 in GitHub Actions.
+## Project Contract
 
-## Prerequisites
+Nuntia is a GitHub Action that writes release notes and migration guides into a published GitHub release, or previews the next release's notes in the job summary.
+It reads the commits a release covers through the GitHub API, follows the issues, pull requests and commits they reference, and sends that context to one model with a prompt.
+`README.md` documents what users see.
 
-- **Node.js**: Version 24 or higher (specified in `package.json` engines)
-- **npm**: Comes bundled with Node.js
-- **Git**: For version control
-- **GitHub Token**: Required for GitHub API access (set as `GITHUB_TOKEN` environment variable)
-- **Model API Key**: Required for AI functionality (set `GEMINI_API_KEY`, `ANTHROPIC_API_KEY`, or `OPENAI_API_KEY`, optionally with `OPENAI_BASE_URL`)
+Preserve these invariants:
 
-## Repository Structure
+- Runtime: Node.js 24 or newer, and `action.yml` runs `dist/index.js` on `node24`.
+- Source of truth: TypeScript under `src/`.
+- Generated bundle: `dist/index.js` is committed and never edited by hand.
+- Inputs: only `model` and `prompt-url`. The commit range comes from the release and the limits are constants, so prefer a built-in default to a new input.
+- Default prompt: `examples/Nuntia.prompt` is bundled into `dist/index.js` and used when `prompt-url` is blank.
+- Everything is read through the GitHub API, so consumers need no checkout step.
+- The only GitHub write is Nuntia's own section of a published release, between `<!-- nuntia:start -->` and `<!-- nuntia:end -->`, made after the job summary and `artifacts/` are written. A preview writes only the job summary and `artifacts/`.
+- Every run cleans the model's notes with `sanitizeNotes` before they reach the notes file, the job summary or the release.
+- Notes are never written from a partial commit range: a compare that returns fewer commits than its total fails the run.
+- A configuration error, such as a missing or rejected key, an unknown model, a missing permission or a `prompt-url` that can't be fetched, fails the run, and so does a bug in Nuntia. A model outage, timeout, truncated reply or refusal, and a GitHub rate limit or outage, only warn in the log and the job summary.
+- Unit tests need no GitHub or model credentials, and no network beyond localhost.
+- `action.yml`, `README.md`, the tests and `dist/` describe the same behavior.
 
-```
-Nuntia/
-├── .github/          # GitHub workflows and configuration
-├── dist/             # Compiled output (generated, committed to repo)
-├── examples/         # Default prompt (bundled into dist) and example workflow
-├── src/              # TypeScript source code
-│   └── llm/          # Shared model layer, copied verbatim from AutoTriage
-├── tests/            # Test files using Vitest
-│   └── llm/          # Shared model layer tests, copied verbatim from AutoTriage
-├── action.yml        # GitHub Action metadata
-├── package.json      # Dependencies and scripts
-├── tsconfig.json     # TypeScript configuration
-└── vitest.config.mts # Test configuration
-```
+## Context Map
 
-## Initial Setup
+Start with the smallest useful context:
 
-### 1. Clone the Repository
+- `src/index.ts` - entry point. It loads the config and the prompt, resolves the range, builds the context, calls the model, cleans the notes, and writes `artifacts/`, the job summary and the release. It also decides which failures fail the run: a `ModelError` of kind `fatal` (a rejected key, an unknown model or a billing problem) or any other exception fails it, while other model failures and transient GitHub failures stop with a warning.
+- `src/env.ts` - `getConfig`: the inputs, the default model for each API key, and the release event payload.
+- `src/types.ts` - shared types, including the `ReleaseContext` the model receives.
+- `src/release.ts` - which commits a run covers. A release event or a dispatch on a tag reads the base from the release's `**Full Changelog**` link, with `POST generate-notes` as the fallback, and any other run previews from the latest release, or the newest tag, to `GITHUB_SHA`.
+- `src/references.ts` - finds issue, pull request and commit references in commit messages and linked item text.
+- `src/context.ts` - follows references, up to 5 for each commit and 2 levels deep, and keeps the context within its budgets: 300 GitHub API calls, then 360,000 characters of compact JSON, trimmed in order by dropping the items found through other linked items, then the changed-file list, then cutting linked item bodies shorter.
+- `src/github.ts` - the GitHub API boundary: `GitHubClient`, which counts its calls, the throttling policy (wait out a rate limit only when it lifts within 60 seconds, up to 3 retries for each request), and `isRateLimited` and `isTransientFailure`.
+- `src/prompt.ts` - loads the bundled prompt or the one at `prompt-url` (a 30-second timeout and two retries), and puts the compact context JSON in the user prompt.
+- `src/sanitize.ts` - cleans the notes: removes raw HTML, images and Nuntia's markers, wraps @mentions and outside bare URLs in backticks, and keeps only the text of links outside the repository.
+- `src/publish.ts` - reads the release again and splices the notes between Nuntia's markers, warning instead of writing when the markers are broken, the body would pass 125,000 characters, the release is gone, or GitHub fails transiently. HTTP 401 and any other 403 fail the run, because the workflow lacks `contents: write`.
+- `src/llm/` - the model API boundary, copied from AutoTriage (see Change Rules). `endpoint.ts` picks the Chat Completions endpoint and key for the `model` input, and `chat.ts` is the one client every provider goes through, with its retries, call deadline and failure kinds.
+- `examples/Nuntia.prompt` - the bundled prompt: a short brief plus a major and a minor worked example.
+- `examples/workflows/nuntia.yml` - the example workflow that the README quick start shows.
+- `tests/` - Vitest files named after the modules they cover, with `tests/promptBuilder.test.ts` for `src/prompt.ts`, `tests/index.test.ts` for the entry point, `tests/llm/` for the shared layer, and `tests/setup.ts` for the test environment.
+- `action.yml` - public action metadata.
+- `.github/workflows/ci.yml` - the only CI workflow (see Required Verification).
+- `.github/workflows/autotriage.yml` - triages this repository's own issues and pull requests with AutoTriage.
+- `dist/` - the generated bundle.
 
-```bash
-git clone https://github.com/danielchalmers/Nuntia.git
-cd Nuntia
-```
+Read the relevant source and nearby tests before editing. Prefer repository-local evidence over assumptions from memory.
 
-### 2. Install Dependencies
+## Operating Loop
 
-```bash
-npm ci
-```
+For any change:
 
-Use `npm ci` (clean install) for reproducible builds based on `package-lock.json`.
+1. Inspect the current implementation, tests and public contract.
+2. Make the smallest coherent change.
+3. Add or update focused tests when behavior changes.
+4. Run the narrowest useful verification first, such as `npx vitest run tests/release.test.ts`.
+5. Run the required verification before finishing.
+6. Rebuild `dist/` and commit it with the change when source, the bundled prompt, dependencies or build settings change runtime output.
+7. Summarize what changed, what was verified, and any remaining risk.
 
-### 3. Credentials
+If something fails, do not guess. Treat the failure as a missing capability, a broken invariant, a stale test or a real regression, and fix that cause.
 
-Unit tests mock GitHub and `fetch`, and model calls go to local stand-in servers, so `npm test` needs no credentials or network access beyond localhost.
-`GITHUB_TOKEN` and a model API key are only needed to run the action itself against real services.
-
-## Development Workflow
-
-### Available npm Scripts
-
-- `npm run typecheck` - Type-check TypeScript without emitting files
-- `npm run typecheck:test` - Type-check the tests (and source) with `tsconfig.test.json`
-- `npm run dev` - Watch mode for TypeScript compilation
-- `npm run build` - Full production build (typecheck, clean, and bundle)
-- `npm run clean` - Remove the dist directory
-- `npm test` - Run all tests once
-- `npm run test:watch` - Run tests in watch mode
-- `npm run check:dist` - Fail if `dist/` has changes that aren't committed
-- `npm run verify` - Run both type-checks, the tests, the build and `check:dist` in order, as CI does
-
-### TypeScript Development
-
-1. Make changes to source files in `src/`
-2. Run type checking: `npm run typecheck`
-3. For continuous development, use watch mode: `npm run dev`
-
-### Testing
-
-Tests are located in the `tests/` directory and use Vitest.
-
-#### Running Tests
+## Required Verification
 
 ```bash
-npm test
+npm run verify
 ```
 
-#### Test Environment
+It runs `typecheck`, `typecheck:test`, `test`, `build` and `check:dist` in order, as CI does.
+`check:dist` fails while `git status` shows any change under `dist/`, so commit the rebuilt bundle with the change that caused it and run `npm run verify` again.
+esbuild's output is byte-identical on Windows and Linux, and `.gitattributes` pins LF line endings, so a bundle built locally matches CI's.
 
-- Tests use Vitest with Node.js environment
-- Test files: `tests/**/*.test.ts`
-- `vitest.config.mts` loads `.prompt` imports as text, matching the build, so tests see the bundled prompt
-- `tests/setup.ts` removes the `GITHUB_*`, `INPUT_*` and `RUNNER_*` variables before the test files load and before each test, so the runner's environment can't change a result. A test that needs one stubs it with `vi.stubEnv`.
-- Only failing tests print their logs (`silent: 'passed-only'`). A test that checks a log line spies on it, with `vi.spyOn(console, 'log')` or a mocked `@actions/core`.
+CI is the single workflow `.github/workflows/ci.yml`, which runs on pushes to `main` and on every pull request, stacked ones included. A newer push to a pull request cancels its older run, and pushes to `main` never cancel each other.
 
-## Shared Model Layer
+- The `build` job runs `npm ci` and `npm run verify` on Node 24.
+- The `mock` job then runs `dist/index.js` with a synthetic `release` event for a fixed past range, PRs #45 to #53 (`86c7d7a...2fb4038`), with `claude-haiku-5-5` through `ANTHROPIC_API_KEY`, and uploads `artifacts/`. The range never grows, so each run costs about 16 GitHub API calls and 26K input tokens.
+- The mock's permissions are read-only, so it can't write into a release, and it ends with one expected warning that the release no longer exists. Fork pull requests skip it, because they get no secrets.
+- The mock bypasses `action.yml` and the preview path, so `tests/env.test.ts` checks that `action.yml` declares exactly the inputs `getConfig` reads and runs `dist/index.js` on Node 24, and `tests/release.test.ts` covers the preview.
+- CI calls no other model. There is no Gemini or OpenAI step, because every provider goes through the same Chat Completions client, which `tests/llm/` covers.
 
-`src/llm/` (`endpoint.ts` picks the Chat Completions endpoint and key for the model input, and `chat.ts` is the one client every provider goes through) and `tests/llm/` are copied verbatim from [AutoTriage](https://github.com/danielchalmers/AutoTriage), which owns them.
+## Development Commands
 
-- Never edit them here. Make the change in AutoTriage, then copy both folders over in a paired PR that names the AutoTriage commit, and check that `diff -r` against that commit is empty.
-- Nuntia's own wiring (the default models and the text call) lives in `src/env.ts` and `src/index.ts`.
+- `npm ci` - install dependencies from `package-lock.json`.
+- `npm run typecheck` - type-check the source.
+- `npm run typecheck:test` - type-check the source and the tests with `tsconfig.test.json`.
+- `npm test` - run Vitest once.
+- `npm run test:watch` - run Vitest in watch mode.
+- `npm run dev` - type-check the source in watch mode.
+- `npm run build` - type-check, clean `dist/`, and bundle with esbuild into one minified `dist/index.js`, with `.prompt` files inlined as text and third-party license notices at the end (no source map or code-split chunks).
+- `npm run check:dist` - fail if `dist/` has uncommitted changes.
+- `npm run verify` - all of the checks above in CI's order.
+- `npm run clean` - remove `dist/`.
 
-## Building the Project
+## Change Rules
 
-### Creating the dist Folder
+### Source Changes
 
-The `dist/` folder contains the compiled, bundled JavaScript that GitHub Actions executes. **This folder must be committed to the repository** as GitHub Actions runs directly from it.
+- Keep TypeScript strictness intact, including `noUncheckedIndexedAccess` and `exactOptionalPropertyTypes`.
+- Validate or narrow untrusted shapes at the boundary: the release event payload and REST responses in `src/github.ts`, the prompt fetched from `prompt-url`, and the model's reply, which `sanitizeNotes` cleans. Commit messages and issue text are untrusted public input.
+- Keep external access behind `GitHubClient`, `ChatClient` and `loadPrompt`, so tests can replace it.
+- Send GitHub and model requests one at a time. The reference walk is sequential, so the API call budget and the stop on the first rate limit stay exact.
+- Write code comments as complete sentences that break only at sentence boundaries, never hard-wrapped at a column width.
+- Avoid broad refactors unless they directly reduce risk for the change.
 
-#### Build Process
+### Shared Model Layer
 
-```bash
-npm run build
-```
+- `src/llm/` and `tests/llm/` are copied verbatim from [AutoTriage](https://github.com/danielchalmers/AutoTriage), which owns them. Never edit them here.
+- Make the change in AutoTriage, then copy both folders over in a paired PR that names the AutoTriage commit, and check that `diff -r` against that commit is empty.
+- Nuntia's own wiring, the default models and the text call, lives in `src/env.ts` and `src/index.ts`.
 
-This command performs the following steps:
+### Public Action Changes
 
-1. **Type-checking** (`npm run typecheck`) - Validates TypeScript code
-2. **Clean** (`npm run clean`) - Removes the existing dist folder
-3. **Bundle** (`esbuild`) - Bundles TypeScript into a single `dist/index.js`
-   - Inlines `examples/Nuntia.prompt` as text (`--loader:.prompt=text`)
-   - Minifies the output
-   - Appends third-party license notices to the end of the file
-   - Emits one file only (no code-split chunks or source map)
+When changing an input, a default, a permission or behavior users see:
 
-#### Important: Commit dist Changes
+- Update `action.yml`, `README.md`, and `examples/workflows/nuntia.yml` when it uses what changed.
+- Update `getConfig` and its tests. `tests/env.test.ts` fails when `action.yml` and `getConfig` disagree on the inputs.
+- Rebuild `dist/` and inspect the change.
 
-After building, the `dist/` folder contents must be committed:
+### Prompt and Context Changes
 
-```bash
-npm run build
-git add dist/
-git commit -m "Build: Update dist folder"
-```
+- `examples/Nuntia.prompt` is bundled, so editing it changes runtime output and needs a rebuild.
+- Keep its two worked examples, each between `=== EXAMPLE NOTES ===` and `=== END OF EXAMPLE NOTES ===`. `tests/promptBuilder.test.ts` checks that they come through `sanitizeNotes` unchanged and keep the shape of a major and a minor release.
+- Test prompt changes with small targeted assertions, not snapshots of the whole prompt.
+- The context budget counts characters of the compact JSON the model receives, not tokens. Claude was measured at 2.4 characters a token for this JSON, so 360,000 characters is about 150k tokens. Log sizes in characters and label any token count as an estimate.
 
-The CI workflow (`ci.yml`) rebuilds `dist/` on Node.js 24 (matching the action runtime) and fails if the committed output drifts from a fresh build:
+### Dependency Changes
 
-```bash
-npm run build
-npm run check:dist   # exits non-zero if git sees any change under dist/
-```
+Before adding a dependency, check whether the existing stack already solves the problem. A new dependency must work on Node.js 24 in GitHub Actions, be committed in `package-lock.json`, be covered by tests, and bundle to byte-identical output on Windows and Linux, or `check:dist` breaks. That is why the action writes `artifacts/` and leaves uploading them to the workflow, instead of bundling `@actions/artifact`, whose Azure SDK isn't reproducible.
 
-If you forget to rebuild dist after changing source code, the CI will fail. esbuild produces byte-identical output across Windows and Linux (and `.gitattributes` pins line endings), so the committed bundle a developer builds locally matches the Linux CI rebuild.
+## Testing Expectations
 
-## Pre-commit Checklist
+For release notes behavior, cover:
 
-Before committing changes, ensure:
+- A release event, a dispatch on a tag, and a preview.
+- Missing, malformed or partial input, such as a release body without a usable Full Changelog link, broken markers, or text that only looks like a reference.
+- Model failures by kind, and GitHub failures: rate limits, outages, HTTP 401 and other 403s.
+- What reaches `artifacts/`, the job summary and the release.
 
-1. ✅ **Type-check passes**: `npm run typecheck` and `npm run typecheck:test`
-2. ✅ **Tests pass**: `npm test`
-3. ✅ **Build succeeds**: `npm run build`
-4. ✅ **dist is up to date**: Commit any changes in `dist/` folder
-5. ✅ **No uncommitted changes in dist**: `git status` shows clean dist
+Mock `GitHubClient` with a stub, as the `makeClient` helpers in `tests/` do, and stub `fetch` with `vi.stubGlobal` for `prompt-url`. When the transport itself matters, point the real Octokit or the model client at a localhost server, as `tests/github.test.ts` and `tests/llm/chat.test.ts` do.
+`src/index.ts` runs the action on import, so `tests/index.test.ts` mocks every collaborator with I/O and imports a fresh copy for each test.
+`tests/setup.ts` removes every `GITHUB_*`, `INPUT_*` and `RUNNER_*` variable before the test files load and again before each test, so a test sets what it needs with `vi.stubEnv`.
+Only failing tests print their logs (`silent: 'passed-only'`), so spy on `console` only to assert a log line, and mock `@actions/core` in tests that reach commands such as `warning`, which write straight to stdout.
+Running the action itself needs `GITHUB_TOKEN` and a model API key, but unit tests must never depend on them.
 
-`npm run verify` runs these checks in order, as CI does.
+## Failure Recovery
 
-## Continuous Integration
+- `npm ci` fails: check the Node and npm versions and the lockfile.
+- Typecheck fails: fix the types rather than weakening strictness.
+- Tests fail: decide whether it is a regression, a stale expectation, a missing mock or the environment.
+- A test reaches GitHub, a model API or the network: mock the client, stub `fetch`, or use a localhost server.
+- Build fails: read the first compiler or bundler error before retrying.
+- `check:dist` fails: rebuild, inspect the generated diff, and commit `dist/` with the change.
+- `src/llm/` or `tests/llm/` need a fix: make it in AutoTriage first.
+- Credentials are missing: don't invent them, and report the blocked verification.
 
-CI is one workflow, `.github/workflows/ci.yml`, which runs on pushes to main and on every pull request, stacked ones included.
-A newer push to a pull request cancels that pull request's older run, and pushes to main never cancel each other.
+## Pull Request Readiness
 
-1. The `build` job installs dependencies with `npm ci` and runs `npm run verify`.
-2. The `mock` job then writes release notes with Claude Haiku for a fixed past release, PRs #45 to #53 (`86c7d7a...2fb4038`), by running `dist/index.js` with a synthetic `release` event, and uploads `artifacts/`. The range never grows, so each run costs about 16 GitHub API calls and 26K input tokens.
-   - Its permissions are read-only, so it can't write into a release. No release has that tag, so each run ends with one expected warning that the release no longer exists.
-   - Fork pull requests skip it, because they get no secrets.
-   - It runs the bundle directly, so it exercises neither `action.yml` nor the preview path. `tests/env.test.ts` checks `action.yml`'s inputs and entry point, and `tests/release.test.ts` covers the preview.
+Before opening or updating a PR:
 
-## Common Tasks
-
-### Adding New Dependencies
-
-```bash
-npm install <package-name>
-npm run build
-```
-
-### Updating TypeScript Code
-
-1. Edit source files in `src/`
-2. Run `npm run typecheck` to verify types
-3. Run `npm test` to ensure tests pass
-4. Run `npm run build` to update dist
-5. Commit both source and dist changes
-
-## Working with the GitHub Action
-
-The action is defined in `action.yml` and runs from `dist/index.js`. Key points:
-
-- **Entry point**: `dist/index.js`
-- **Runtime**: Node.js 24 (specified in `action.yml`)
-- **Inputs**: Defined in `action.yml`. There are only `model` and `prompt-url`; the commit range comes from the release, and the context limits are constants in `src/context.ts`.
-- **Outputs**: none. The release body, the job summary and `artifacts/nuntia-release-notes.md` carry the notes.
-- **Commit range** (`src/release.ts`): a `release` event uses the release in its payload, and a `workflow_dispatch` on a tag reads that tag's release. Either way the base comes from the release body's `**Full Changelog**: …/compare/BASE...TAG` link, matched in any letter case, which must point at this repository and tag, with `POST generate-notes` as the fallback. A `/commits/TAG` link is a first release, which logs a notice and exits 0. Any other run is a preview from the latest release (or the newest tag by commit date) to `GITHUB_SHA`, and never calls generate-notes, because that needs `contents: write`. The range is base-exclusive, matching the compare API.
-- **References** (`src/references.ts`, `src/context.ts`): a `#N` after `&` is an HTML character reference such as `&#8203;`, an `owner/repo#N` that follows a path character is the end of a file path, and a SHA inside any link is part of its address, so none of them is a reference. The walk keys issues and pull requests by repository and number, without the type a reference guesses, and remembers failed lookups, so each item costs one lookup.
-- **Context size** (`src/context.ts`): following references stops once the run has made 300 GitHub API calls, counted by `GitHubClient`. A context over 360,000 characters (about 150k tokens at the 2.4 characters a token measured on Claude) is trimmed in order: the linked items found through other linked items, then the changed-file list, then shorter linked item bodies. The budget counts characters of the compact JSON the model receives, and the log gives sizes in characters, labelling any token count as an estimate at 2.4 characters a token. A changed-file list cut at GitHub's 300-file compare cap warns only when trimming keeps the list.
-- **Default prompt**: `examples/Nuntia.prompt`, bundled into `dist/index.js` and used when `prompt-url` is blank. Editing it changes runtime output, so rebuild `dist/`. It is a short brief that has the model size up the release (major, minor, patch or prerelease) before choosing the shape of the notes, plus two worked examples, a major release and a minor one, each between `=== EXAMPLE NOTES ===` and `=== END OF EXAMPLE NOTES ===`. `tests/promptBuilder.test.ts` checks that both come through `sanitizeNotes` unchanged and keep their shapes. `src/release.ts` sets `release.hasChangeList` when the release body already has GitHub's generated list (`hasGeneratedNotes` in `src/publish.ts`, which ignores Nuntia's own section), and the prompt then writes only a headline, highlights and upgrading steps. Without the list, and in a preview, it adds a short `## Changes by area`.
-- **Prompt URL input**: `prompt-url` (optional) fetches a prompt to try without committing it, with a 30-second timeout and two retries. A prompt that still can't be fetched fails the run.
-- **Model failures** (`src/index.ts`): a `ModelError` of kind `fatal` (a rejected key, an unknown model or a billing problem) fails the run, and so does any other exception from the call, because that would be a bug. Any other `ModelError`, such as the 15-minute call deadline, an overload that outlasts the retries, a reply cut off at the output limit or a refusal, only warns in the log and the job summary, and nothing is written.
-- **GitHub failures** (`src/github.ts`, `src/context.ts`, `src/index.ts`): the throttling plugin waits out a rate limit only when it lifts within 60 seconds, with up to 3 retries for each request; a longer wait, such as for the hourly quota to reset, fails the request at once. `isRateLimited` tells a rate-limited 403 from a missing permission, and `isTransientFailure` adds 408, 5xx and network failures, which Octokit reports as 500. The first rate-limited lookup stops the reference walk with one warning, while other failed lookups are logged and skipped. A transient failure while resolving the range or comparing the commits warns in the log and the job summary, and nothing is written. HTTP 401, any other 403, and every other error fail the run.
-- **Cleaning** (`src/sanitize.ts`): every run cleans the model's notes before they reach the notes file, the job summary or the release. It removes raw HTML, images and `nuntia:start`/`nuntia:end` markers, wraps @mentions and bare URLs outside the repository in backticks, and keeps only the text of links outside `github.com/{owner}/{repo}`. Fenced code and code spans are left as written. Syntax it can't parse is escaped rather than passed through.
-- **Writing into the release** (`src/publish.ts`): only for a published release (a `release` event or a dispatch on a tag), after the job summary is written. It reads the release again by tag, replaces the text between `<!-- nuntia:start -->` and `<!-- nuntia:end -->` or inserts that block just before GitHub's generated notes (or at the top), and saves it with `PATCH` when the body changed. A body over 125,000 characters, broken markers, a deleted release, HTTP 404, and any transient failure, a rate-limited 403 included, only warn. Any other HTTP 401 or 403 fails the run, because the workflow is missing `contents: write`.
-- **Workspace**: the action reads everything through the GitHub API, so consumers need no checkout step.
-
-## File Artifacts
-
-The action writes these files to the `artifacts/` directory during execution:
-
-- `artifacts/nuntia-release-notes.md` - Generated release notes output
-- `artifacts/nuntia-payload.json` - The model and both prompts sent (debug)
-- `artifacts/nuntia-context.json` - Resolved release context (debug)
-
-The action does not upload them itself (that would require bundling `@actions/artifact`, whose transitive Azure SDK is not byte-reproducible across OSes and breaks the dist check). Upload them from your workflow with `actions/upload-artifact` and `path: artifacts`.
-
-## Troubleshooting
-
-### Build Failures
-
-**Issue**: `npm run build` fails
-- Check Node.js version: `node --version` (must be 24+)
-- Clear node_modules: `rm -rf node_modules && npm ci`
-- Check TypeScript errors: `npm run typecheck`
-
-### Test Failures
-
-**Issue**: A test tries to reach GitHub, a model API, or the network
-- Tests must not depend on real services; mock the client (see the `makeClient` helpers in `tests/`), stub `fetch` with `vi.stubGlobal`, or point the model client at a local server (see `tests/llm/chat.test.ts`)
-
-## Best Practices
-
-1. **Always rebuild dist** after changing source code
-2. **Run type-check** before committing
-3. **Run tests** to catch regressions
-4. **Use `npm ci`** in CI/CD and for clean installs
-5. **Keep dist committed** - GitHub Actions needs it
-6. **Don't edit dist manually** - always regenerate with `npm run build`
-7. **Follow TypeScript strict mode** - project uses strict compiler options
-
-## Additional Resources
-
-- **README.md** - User-facing documentation and setup guide
-- **action.yml** - GitHub Action configuration and input definitions
-- **examples/** - The default prompt (bundled into `dist/`) and the sample workflow
-- **.github/workflows/** - CI/CD pipeline definitions
-
-## Questions?
-
-For questions or issues:
-1. Check existing issues on GitHub
-2. Review the README.md for user documentation
-3. Examine the CI workflows for expected behavior
-4. Consult TypeScript and GitHub Actions documentation
+- `npm run verify` has passed, or each blocked check is named with its reason.
+- Runtime-impacting changes include the rebuilt `dist/`.
+- Public behavior changes are reflected in `action.yml`, `README.md` and the tests.
+- A copy of `src/llm/` names the AutoTriage commit it came from.
+- Unrelated files are not modified.
+- The PR body explains the why, the what, the verification and the residual risk.
