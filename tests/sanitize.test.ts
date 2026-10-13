@@ -164,6 +164,53 @@ describe('sanitizeNotes', () => {
     ).toBe('See `https://example.com/x`. And (`https://example.com/a`), **`www.example.com`**, `https://example.com/auto` and https://github.com/acme/widgets/pull/3.');
   });
 
+  it('cleans footnotes and lines with anything after a definition, which GitHub shows as text', () => {
+    expect(sanitize('Dialogs animate.[^1]\n\n[^1]: See [the docs](https://evil.example/p) and thanks @alice.')).toBe(
+      'Dialogs animate.[^1]\n\n[^1]: See the docs and thanks `@alice`.'
+    );
+    expect(sanitize('[ref]: https://github.com/acme/widgets @alice ![i](https://evil.example/i.png)')).toBe('[ref]: https://github.com/acme/widgets `@alice` ');
+    expect(sanitize('[a]: x @alice')).toBe('[a]: x `@alice`');
+  });
+
+  it('drops a definition inside a blockquote or list that points outside the repository, even through an escaped colon', () => {
+    expect(sanitize('See the [guide][docs].\n\n> [docs]: https\\://evil.example/phish')).toBe('See the guide.\n\n>');
+    expect(sanitize('See the [guide][docs].\n\n- [docs]: https\\://evil.example/phish')).toBe('See the guide.\n\n-');
+  });
+
+  it('keeps a definition into the repository without its title', () => {
+    expect(sanitize('See [pr][2].\n\n[2]: https://github.com/acme/widgets/pull/2 "@alice"')).toBe('See [pr][2].\n\n[2]: https://github.com/acme/widgets/pull/2');
+  });
+
+  it('cleans a line indented four columns right after text, which GitHub reads as more of that text rather than a fence', () => {
+    expect(sanitize('Intro\n    ~~~\n    @alice <img src=x>\n    ~~~')).toBe('Intro\n    ~~~\n    `@alice` \n    ~~~');
+    expect(sanitize('Intro\n    > ~~~\n    > @alice\n    > ~~~')).toBe('Intro\n    > ~~~\n    > `@alice`\n    > ~~~');
+    // A tab indents four columns, so the line after it ends the code.
+    expect(sanitize('\t~~~\n  @alice')).toBe('\t~~~\n  `@alice`');
+  });
+
+  it('keeps a fence that starts on a list item line as code', () => {
+    expect(sanitize('1. ```razor\n   <MudButton>Save</MudButton>\n   ```\n\nThanks @alice')).toBe('1. ```razor\n   <MudButton>Save</MudButton>\n   ```\n\nThanks `@alice`');
+  });
+
+  it("keeps a code span from hiding text inside a link or URL, where GitHub doesn't read it as code", () => {
+    expect(sanitize('See [the PR](https://github.com/acme/widgets/pull/1`)@alice [x](https://evil.example/p)`) now.')).toBe('See the PR now.');
+    expect(sanitize('See https://github.com/acme/widgets/pull/1`x @alice <img src=x>` now.')).toBe('See https://github.com/acme/widgets/pull/1 `x @alice <img src=x>` now.');
+    expect(sanitize('See <https://github.com/acme/widgets/pull/1`>@alice` now.')).toBe('See &lt;https://github.com/acme/widgets/pull/1 `>@alice` now.');
+  });
+
+  it('reads letters spelled as character references, which GitHub shows as the letters', () => {
+    expect(sanitize('Thanks @&#97;lice and h&#x74;tps://evil.example, but not `&#97;`.')).toBe('Thanks `@alice` and `https://evil.example`, but not `&#97;`.');
+  });
+
+  it('cleans again when removing a marker or a comment joins the text around it into a mention or a link', () => {
+    expect(sanitize('Thanks nuntia:sta<!---->rt@alice.')).toBe('Thanks `@alice`.');
+    expect(sanitize('Read [the guide]nuntia:sta<!---->rt(https://evil.example/p).')).toBe('Read the guide.');
+  });
+
+  it('treats ftp and escaped-colon URLs like any other outside the repository', () => {
+    expect(sanitize('Get it from ftp://evil.example/file.zip or https\\://evil.example/x.')).toBe('Get it from `ftp://evil.example/file.zip` or `https://evil.example/x`.');
+  });
+
   it('normalizes Windows line endings', () => {
     expect(sanitize('```\r\n<a>\r\n```\r\nDone')).toBe('```\n<a>\n```\nDone');
   });
