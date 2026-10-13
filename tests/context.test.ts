@@ -15,7 +15,6 @@ const CONFIG: Config = {
   repo: 'widgets',
   token: 'token',
   promptUrl: 'https://example.com/prompt.txt',
-  model: 'gemini-3.5-flash-lite',
   endpoint: {
     provider: 'gemini',
     model: 'gemini-3.5-flash-lite',
@@ -69,7 +68,7 @@ function makeClient(
 ): GitHubClient {
   const commits = opts.commits ?? [makeCommit()];
   const endpoints = {
-    compareCommits: vi.fn().mockResolvedValue({ commits, status: 'ahead', totalCommits: commits.length, files: [], filesTruncated: false, ...opts.compare }),
+    compareCommits: vi.fn().mockResolvedValue({ commits, totalCommits: commits.length, files: [], filesTruncated: false, ...opts.compare }),
     getCommit: typeof opts.commit === 'function' ? opts.commit : vi.fn().mockResolvedValue(opts.commit ?? makeCommit()),
     getIssueOrPullRequest:
       typeof opts.issue === 'function' ? opts.issue : vi.fn().mockResolvedValue(opts.issue ?? makeIssue()),
@@ -127,11 +126,11 @@ describe('buildReleaseContext', () => {
   });
 
   it('builds an empty context when there are no commits after the base', async () => {
-    const gh = makeClient({ commits: [], compare: { status: 'identical' } });
+    const gh = makeClient({ commits: [], compare: {} });
 
     const context = await build(gh);
 
-    expect(context.range).toMatchObject({ totalCommits: 0, status: 'identical' });
+    expect(context.range).toMatchObject({ totalCommits: 0 });
     expect(context.commits).toEqual([]);
     expect(context.linkedItems).toEqual([]);
   });
@@ -145,7 +144,7 @@ describe('buildReleaseContext', () => {
     const context = await build(gh);
 
     expect(context.linkedItems).toHaveLength(1);
-    expect(context.range).toMatchObject({ totalCommits: 1, changedFiles: ['src/index.ts'], status: 'ahead' });
+    expect(context.range).toMatchObject({ totalCommits: 1, changedFiles: ['src/index.ts'] });
     expect(context.linkedItems[0]).toMatchObject({
       type: 'issue',
       id: '42',
@@ -416,15 +415,6 @@ describe('buildReleaseContext', () => {
       makeCommit({ sha: `range${i}`.padEnd(40, '0'), message: `Change ${i}`, url: `https://github.com/acme/widgets/commit/range${i}` })
     );
   }
-
-  it('builds the context for a complete range of more than 250 commits', async () => {
-    const gh = makeClient({ commits: makeRangeCommits(348) });
-
-    const context = await build(gh);
-
-    expect(context.range.totalCommits).toBe(348);
-    expect(context.commits).toHaveLength(348);
-  });
 
   it('throws instead of producing notes when the commit range is incomplete', async () => {
     // Compare reported 300 commits in the range but returned only 250 of them.

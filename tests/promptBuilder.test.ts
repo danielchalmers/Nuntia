@@ -1,13 +1,13 @@
 import * as fs from 'fs';
 import { describe, it, expect, vi, afterEach, beforeEach, type MockInstance } from 'vitest';
-import { buildPrompt, loadPrompt } from '../src/prompt';
+import { contextMessage, loadPrompt } from '../src/prompt';
 import { sanitizeNotes } from '../src/sanitize';
 import type { ReleaseContext } from '../src/types';
 
 const PROMPT_URL = 'https://example.com/prompt.txt';
 const HINT = 'Check prompt-url, or leave it blank to use the bundled prompt.';
 
-describe('buildPrompt', () => {
+describe('contextMessage', () => {
   const context: ReleaseContext = {
     repository: { owner: 'acme', repo: 'widgets', branch: 'main' },
     release: { tag: 'v1.1.0', previousTag: 'v1.0.0', name: 'Widgets 1.1', prerelease: false, hasChangeList: true },
@@ -26,20 +26,8 @@ describe('buildPrompt', () => {
     ],
   };
 
-  it('uses the prompt unchanged as the system prompt', () => {
-    const { systemPrompt } = buildPrompt(context, 'Test prompt content\n');
-
-    expect(systemPrompt).toBe('Test prompt content\n');
-  });
-
-  it('sends the complete release context as compact JSON in the user prompt', () => {
-    const { userPrompt } = buildPrompt(context, 'Test prompt content');
-    const header = '=== RELEASE CONTEXT (JSON) ===\n';
-
-    expect(userPrompt.startsWith(header)).toBe(true);
-    expect(JSON.parse(userPrompt.slice(header.length))).toEqual(context);
-    expect(userPrompt).toBe(`${header}${JSON.stringify(context)}\n`);
-    expect(userPrompt).toContain('"repository":{"owner":"acme"');
+  it('sends the complete release context as compact JSON', () => {
+    expect(contextMessage(context)).toBe(`=== RELEASE CONTEXT (JSON) ===\n${JSON.stringify(context)}\n`);
   });
 });
 

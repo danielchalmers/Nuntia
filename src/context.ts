@@ -1,8 +1,8 @@
 import * as core from '@actions/core';
-import type { CommitInfo, Config, LinkedItem, Reference, ReferenceSummary, ReferenceType, ReleaseContext, ReleaseRange } from './types';
-import { extractReferences, referenceKey, summarizeReferences } from './references';
-import type { CommitDetails, IssueOrPullDetails } from './github';
+import type { CommitInfo, Config, LinkedItem, Reference, ReferenceType, ReleaseContext, ReleaseRange } from './types';
+import { extractReferences, referenceKey, resolveKnownSha, summarizeReferences } from './references';
 import { GitHubClient, isRateLimited } from './github';
+import { errorMessage } from './llm/chat';
 
 type QueueEntry = {
   ref: Reference;
@@ -30,10 +30,6 @@ const ESTIMATED_CHARS_PER_TOKEN = 2.4;
 // The shorter lengths linked item bodies are cut at in turn, once nothing else is left to trim.
 const SHORTER_BODY_LENGTHS = [2500, 1000, 500];
 
-function getErrorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
-}
-
 function stripMarkdownComments(text: string): string {
   return text.replace(MARKDOWN_COMMENT, '');
 }
@@ -49,48 +45,6 @@ function mergeReferencedBy(linkedItems: Map<string, LinkedItem>, key: string, so
     existing.referencedBy.push(source);
   }
   return true;
-}
-
-function toCommitInfo(commit: CommitDetails, references: ReferenceSummary, message: string): CommitInfo {
-  return {
-    sha: commit.sha,
-    message,
-    url: commit.url,
-    references,
-  };
-}
-
-function toLinkedCommit(
-  commit: CommitDetails,
-  owner: string,
-  repo: string,
-  source: string,
-  message: string
-): LinkedItem {
-  return {
-    type: 'commit',
-    owner,
-    repo,
-    id: commit.sha,
-    message,
-    url: commit.url,
-    referencedBy: [source],
-  };
-}
-
-function toLinkedIssue(details: IssueOrPullDetails, source: string, title: string, body: string): LinkedItem {
-  return {
-    type: details.type === 'pull' ? 'pull' : 'issue',
-    owner: details.owner,
-    repo: details.repo,
-    id: String(details.number),
-    title,
-    body,
-    url: details.url,
-    state: details.state,
-    labels: details.labels,
-    referencedBy: [source],
-  };
 }
 
 /**
@@ -131,7 +85,7 @@ async function resolveCommitReference(
   const message = stripMarkdownComments(details.message);
   return {
     key: itemKey({ ...ref, id: details.sha }),
-    linked: toLinkedCommit(details, ref.owner, ref.repo, source, message),
+    linked: { type: 'commit', owner: ref.owner, repo: ref.repo, id: details.sha, message: truncateText(message), url: details.url, referencedBy: [source] },
     referenceText: message,
     sourceLabel: formatSource('commit', details.sha),
   };
@@ -143,26 +97,32 @@ async function resolveIssueReference(
   source: string
 ): Promise<ResolvedReference> {
   const details = await gh.getIssueOrPullRequest(ref.owner, ref.repo, Number(ref.id));
-  const title = stripMarkdownComments(details.title || '');
-  const body = stripMarkdownComments(details.body || '');
-  const linked = toLinkedIssue(details, source, title, body);
+  const title = stripMarkdownComments(details.title);
+  const body = stripMarkdownComments(details.body);
+  const id = String(details.number);
   return {
-    key: itemKey({ type: details.type, owner: details.owner, repo: details.repo, id: String(details.number) }),
-    linked,
+    key: itemKey({ ...ref, id }),
+    linked: {
+      type: details.type,
+      owner: ref.owner,
+      repo: ref.repo,
+      id,
+      title: truncateText(title),
+      body: truncateText(body),
+      url: details.url,
+      state: details.state,
+      labels: details.labels,
+      referencedBy: [source],
+    },
     referenceText: `${title}\n\n${body}`,
-    sourceLabel: formatSource(linked.type, linked.id),
+    sourceLabel: formatSource(details.type, id),
   };
 }
 
 function normalizeCommitReference(ref: Reference, knownCommits: Set<string>): Reference {
   if (ref.type !== 'commit') return ref;
-  const normalized = ref.id.toLowerCase();
-  for (const sha of knownCommits) {
-    if (sha.startsWith(normalized)) {
-      return { ...ref, id: sha };
-    }
-  }
-  return { ...ref, id: normalized };
+  const id = ref.id.toLowerCase();
+  return { ...ref, id: resolveKnownSha(id, knownCommits) ?? id };
 }
 
 function truncateText(text: string, maxLength = MAX_ITEM_LENGTH): string {
@@ -229,7 +189,14 @@ function trimContext(context: ReleaseContext, deepItems: ReadonlySet<LinkedItem>
 /** Gather the commits after range.base up to range.head, and the issues, pull requests and commits they reference. */
 export async function buildReleaseContext(cfg: Config, releaseRange: ReleaseRange, gh: GitHubClient): Promise<ReleaseContext> {
   const { base, head } = releaseRange;
-  const { commits, status, totalCommits, files, filesTruncated } = await gh.compareCommits(base, head);
+  const { commits, totalCommits, files, filesTruncated } = await gh.compareCommits(base, head);
+
+  // compareCommits pages until it has total_commits, so fewer commits means GitHub returned only part of the range.
+  // A release-notes tool must never publish an incomplete changelog, so fail before spending any lookups on a partial set.
+  const totalCount = totalCommits ?? commits.length;
+  if (commits.length < totalCount) {
+    throw new Error(`Commit range ${base}...${head} is incomplete: got ${commits.length} of ${totalCount} commit(s). Aborting so incomplete release notes are not published.`);
+  }
 
   const knownCommits = new Set(commits.map(commit => commit.sha.toLowerCase()));
   const commitEntries: CommitInfo[] = [];
@@ -240,11 +207,10 @@ export async function buildReleaseContext(cfg: Config, releaseRange: ReleaseRang
     const refs = extractReferences(cleanedMessage, cfg.owner, cfg.repo, knownCommits).map(ref =>
       normalizeCommitReference(ref, knownCommits)
     );
-    const commitInfo = toCommitInfo(commit, summarizeReferences(refs, cfg.owner, cfg.repo), cleanedMessage);
-    commitEntries.push(commitInfo);
-    const source = formatSource('commit', commitInfo.sha);
+    commitEntries.push({ sha: commit.sha, message: truncateText(cleanedMessage), url: commit.url, references: summarizeReferences(refs, cfg.owner, cfg.repo) });
+    const source = formatSource('commit', commit.sha);
     for (const ref of refs) {
-      queue.push({ ref, depth: 1, source, rootCommitSha: commitInfo.sha });
+      queue.push({ ref, depth: 1, source, rootCommitSha: commit.sha });
     }
   }
 
@@ -258,11 +224,9 @@ export async function buildReleaseContext(cfg: Config, releaseRange: ReleaseRang
   const leftOut = new Set<string>();
   // Set by the first lookup that fails on a rate limit, because every lookup after it would fail the same way.
   let rateLimited = false;
-  let index = 0;
 
-  while (index < queue.length) {
-    const item = queue[index++];
-    if (!item) break;
+  // The loop also visits the deeper references pushed onto the queue while it runs.
+  for (const item of queue) {
     if (item.depth > MAX_REFERENCE_DEPTH) continue;
 
     const normalizedRef = normalizeCommitReference(item.ref, knownCommits);
@@ -305,7 +269,7 @@ export async function buildReleaseContext(cfg: Config, releaseRange: ReleaseRang
         }
       }
     } catch (error) {
-      console.warn(`⚠️ Failed to resolve reference ${referenceKey(normalizedRef)}: ${getErrorMessage(error)}`);
+      console.warn(`⚠️ Failed to resolve reference ${referenceKey(normalizedRef)}: ${errorMessage(error)}`);
       if (isRateLimited(error)) {
         rateLimited = true;
         leftOut.add(key);
@@ -319,32 +283,12 @@ export async function buildReleaseContext(cfg: Config, releaseRange: ReleaseRang
     console.log(`Stopped following references at ${MAX_API_CALLS} GitHub API calls, leaving out ${leftOut.size} more.`);
   }
 
-  // compareCommits pages until it has total_commits, so fewer commits means GitHub returned only part of the range.
-  // A release-notes tool must never publish an incomplete changelog, so fail instead of generating notes over a partial set.
-  const authoritativeTotal = typeof totalCommits === 'number' ? totalCommits : commits.length;
-  if (commitEntries.length < authoritativeTotal) {
-    throw new Error(
-      `Commit range ${base}...${head} is incomplete: got ${commitEntries.length} of ${authoritativeTotal} commit(s). Aborting so incomplete release notes are not published.`
-    );
-  }
-
   const range: ReleaseContext['range'] = {
     base,
     head,
-    totalCommits: authoritativeTotal,
+    totalCommits: totalCount,
     changedFiles: files,
-    ...(status !== undefined && { status }),
   };
-
-  for (const commitInfo of commitEntries) {
-    commitInfo.message = truncateText(commitInfo.message);
-  }
-
-  for (const item of linkedItems.values()) {
-    if (typeof item.message === 'string') item.message = truncateText(item.message);
-    if (typeof item.title === 'string') item.title = truncateText(item.title);
-    if (typeof item.body === 'string') item.body = truncateText(item.body);
-  }
 
   const context: ReleaseContext = {
     repository: {

@@ -4,7 +4,7 @@ import * as core from '@actions/core';
 import { getConfig } from './env';
 import { GitHubClient, isRateLimited, isTransientFailure } from './github';
 import { buildReleaseContext } from './context';
-import { buildPrompt, loadPrompt } from './prompt';
+import { contextMessage, loadPrompt } from './prompt';
 import { writeToRelease } from './publish';
 import { resolveRange } from './release';
 import { sanitizeNotes } from './sanitize';
@@ -61,8 +61,7 @@ async function run(): Promise<void> {
     return;
   }
 
-  const { systemPrompt, userPrompt } = buildPrompt(context, prompt.text);
-  const request = { model: cfg.model, systemPrompt, userPrompt };
+  const request = { model: cfg.endpoint.model, systemPrompt: prompt.text, userPrompt: contextMessage(context) };
 
   // Write the debug artifacts before calling the model so a failed generation still leaves them on disk for a workflow whose upload step runs on failure (e.g. `if: always()`).
   writeArtifact('nuntia-payload.json', JSON.stringify(request, null, 2));

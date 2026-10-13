@@ -18,7 +18,6 @@ export type Config = {
   repo: string;
   token: string;
   promptUrl: string;
-  model: string;
   endpoint: Endpoint;
   trigger: Trigger;
 };
@@ -91,7 +90,6 @@ export type ReleaseContext = {
   range: {
     base: string;
     head: string;
-    status?: string;
     totalCommits: number;
     // Left out when the context is trimmed to fit.
     changedFiles?: string[];

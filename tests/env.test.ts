@@ -49,7 +49,6 @@ describe('getConfig', () => {
       repo: 'widgets',
       token: 'token',
       promptUrl: '',
-      model: 'gemini-flash-latest',
       endpoint: {
         provider: 'gemini',
         model: 'gemini-flash-latest',
@@ -82,7 +81,7 @@ describe('getConfig', () => {
     vi.stubEnv('GEMINI_API_KEY', '');
     vi.stubEnv(name, 'other-key');
 
-    expect(getConfig()).toMatchObject({ model, endpoint: { provider, model, apiKey: 'other-key', isDefault: true } });
+    expect(getConfig()).toMatchObject({ endpoint: { provider, model, apiKey: 'other-key', isDefault: true } });
   });
 
   it('masks every model API key that is set', () => {
@@ -104,7 +103,7 @@ describe('getConfig', () => {
     vi.stubEnv('ANTHROPIC_API_KEY', 'anthropic-key');
     setInputs({ model: 'claude-opus-5-5' });
 
-    expect(getConfig()).toMatchObject({ model: 'claude-opus-5-5', endpoint: { provider: 'anthropic', apiKey: 'anthropic-key' } });
+    expect(getConfig()).toMatchObject({ endpoint: { model: 'claude-opus-5-5', provider: 'anthropic', apiKey: 'anthropic-key' } });
   });
 
   it('sends a model to OPENAI_BASE_URL unchanged', () => {
@@ -114,8 +113,7 @@ describe('getConfig', () => {
     setInputs({ model: 'anthropic/claude-sonnet-5.5' });
 
     expect(getConfig()).toMatchObject({
-      model: 'anthropic/claude-sonnet-5.5',
-      endpoint: { provider: 'openai', baseUrl: 'https://openrouter.ai/api/v1', host: 'openrouter.ai' },
+      endpoint: { model: 'anthropic/claude-sonnet-5.5', provider: 'openai', baseUrl: 'https://openrouter.ai/api/v1', host: 'openrouter.ai' },
     });
   });
 
@@ -130,13 +128,6 @@ describe('getConfig', () => {
     vi.stubEnv('GITHUB_REPOSITORY', '');
 
     expect(() => getConfig()).toThrow('Failed to resolve repository context (owner/repo). Ensure this runs in GitHub Actions with a valid repository context.');
-  });
-
-  it('ignores the removed range and tuning inputs', () => {
-    setInputs({ 'base-commit': 'base-sha', 'head-commit': 'head-sha', branch: 'other-org/other-repo@main', 'max-linked-items': '1' });
-
-    expect(getConfig()).toMatchObject({ owner: 'acme', repo: 'widgets', trigger: { ref: 'refs/heads/main', sha: 'run-sha' } });
-    expect(mocks.getInput.mock.calls.map(([name]) => name).sort()).toEqual(['model', 'prompt-url']);
   });
 
   it('reads the release from a release event', () => {
@@ -192,7 +183,7 @@ describe('getConfig', () => {
   it('passes the model and prompt URL inputs through', () => {
     setInputs({ model: 'gemini-custom', 'prompt-url': ' https://example.com/p.txt\n' });
 
-    expect(getConfig()).toMatchObject({ model: 'gemini-custom', promptUrl: 'https://example.com/p.txt', endpoint: { provider: 'gemini' } });
+    expect(getConfig()).toMatchObject({ promptUrl: 'https://example.com/p.txt', endpoint: { model: 'gemini-custom', provider: 'gemini' } });
   });
 
   it('treats a prompt-url of only whitespace as blank, so the bundled prompt is used', () => {

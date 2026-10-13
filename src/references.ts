@@ -16,7 +16,7 @@ function normalizeSha(sha: string): string {
   return sha.trim().toLowerCase();
 }
 
-function resolveKnownSha(prefix: string, knownCommits: ReadonlySet<string>): string | undefined {
+export function resolveKnownSha(prefix: string, knownCommits: ReadonlySet<string>): string | undefined {
   for (const sha of knownCommits) {
     if (sha.startsWith(prefix)) return sha;
   }
@@ -65,12 +65,9 @@ export function extractReferences(
 
     const identity = `${ref.owner}/${ref.repo}#${ref.id}`;
     const existingIndex = issueOrPullIndex.get(identity);
-    if (typeof existingIndex === 'number') {
-      const existing = refs[existingIndex];
-      if (!existing || existing.type === 'commit') return;
-      if (existing.type === 'pull') return;
-      if (ref.type === 'issue') return;
-      refs[existingIndex] = ref;
+    if (existingIndex !== undefined) {
+      // A pull request reference wins over an issue reference to the same number.
+      if (ref.type === 'pull') refs[existingIndex] = ref;
       return;
     }
 
