@@ -50,7 +50,8 @@ const INITIAL_BACKOFF_MS = 5_000;
 // Worst case per call: 10 + 20 + 40 + 60 + 60 + 60 = 250 seconds of waiting out an overload.
 const CAPACITY_RETRIES = 6;
 
-// Hosts that enforce response_format. Anywhere else, such as Claude's compatibility layer, the schema is also written into the prompt.
+// Hosts that enforce response_format, so the schema isn't also written into the prompt.
+// Claude's compatibility layer enforces it too but still gets the schema note, because it ignores reasoning_effort and the note makes Claude reason about twice as long: in a MudBlazor dry run, Haiku caught 82% of the due inactivity actions with the note and 36–42% without it.
 const SCHEMA_ENFORCING_HOSTS = new Set(['api.openai.com', 'generativelanguage.googleapis.com']);
 const BUILT_IN_HOSTS = new Set([...SCHEMA_ENFORCING_HOSTS, 'api.anthropic.com']);
 
@@ -61,6 +62,10 @@ const BILLING_ERROR = /insufficient_quota|credit.balance|spend.limit|usage.limit
 // Gemini answers a bad key with a 400 rather than a 401, worded differently by each of its APIs.
 const API_KEY_ERROR = /api.?key/i;
 const CAPACITY_ERROR = /\b(UNAVAILABLE|RESOURCE_EXHAUSTED|overloaded_error)\b/;
+// A daily quota, such as the 500 requests a day of Gemini's free tier, resets hours later, so waiting it out like an overload only delays the warning.
+const DAILY_QUOTA_ERROR = /PerDay|per day|\b(RPD|TPD)\b/i;
+// OpenRouter refuses a flagged prompt with a 403, which is about the item rather than the key.
+const MODERATION_ERROR = /moderation|flagged|guardrail/i;
 
 // Message-only form, for warnings where a stack would be noise.
 // Network failures carry their code on the cause (fetch only says "fetch failed"), so it is appended when present.
@@ -91,9 +96,11 @@ export function describeReasoning(host: string): string {
 }
 
 function classify(status: number, body: string, endpoint: Pick<Endpoint, 'host' | 'keyName'>): { kind: FailureKind; hint: string } {
+  if (status === 403 && MODERATION_ERROR.test(body)) return { kind: 'permanent', hint: '' };
   if (status === 401 || status === 403 || (status === 400 && API_KEY_ERROR.test(body))) return { kind: 'fatal', hint: ` Check ${endpoint.keyName}.` };
   if (status === 404) return { kind: 'fatal', hint: BUILT_IN_HOSTS.has(endpoint.host) ? ' Check the model name.' : ' Check the model name and the OPENAI_BASE_URL path.' };
   if (status === 402 || ((status === 400 || status === 429) && BILLING_ERROR.test(body))) return { kind: 'fatal', hint: ' Check the account\'s billing.' };
+  if (status === 429 && DAILY_QUOTA_ERROR.test(body)) return { kind: 'permanent', hint: ' The daily quota is used up.' };
   if (status === 429 || status === 503 || status === 529 || CAPACITY_ERROR.test(body)) return { kind: 'capacity', hint: '' };
   // A request timeout or a conflict can succeed when sent again unchanged.
   return { kind: status >= 500 || status === 408 || status === 409 ? 'retryable' : 'permanent', hint: '' };
@@ -115,6 +122,9 @@ function readReply(response: unknown, host: string): { text: string; usage: Usag
     throw new ModelError(`${host} declined to answer: ${message.refusal.trim()}`, 'permanent');
   }
   if (choice.finish_reason === 'content_filter') throw new ModelError(`${host} stopped the reply with its content filter`, 'permanent');
+  // OpenRouter answers for a provider that failed partway through with a 200 that carries an error, and the text so far would otherwise pass as the reply.
+  const failure = asRecord(response).error ?? choice.error;
+  if (failure != null || choice.finish_reason === 'error') throw new ModelError(`${host} failed partway through the reply: ${JSON.stringify(failure ?? choice.finish_reason)}`);
   if (choice.finish_reason === 'length') throw new ModelError(`${host} stopped the reply at the output token limit`, 'permanent');
 
   const content = Array.isArray(message.content)

@@ -66,7 +66,7 @@ describe('ChatClient requests', () => {
     })
   })
 
-  it('also writes the schema into the prompt for a host that may not enforce it', async () => {
+  it('also writes the schema into Claude\'s prompt, because the note makes Claude reason longer', async () => {
     const fetch = stubFetch(reply('{"ok":true}'))
 
     await new ChatClient(CLAUDE, fetch).generateJson(REQUEST, data => data)
@@ -176,6 +176,16 @@ describe('ChatClient replies', () => {
     await expect(new ChatClient(OPENAI, fetch).generateJson(REQUEST, data => data)).rejects.toMatchObject({ kind: 'permanent', message })
     expect(fetch).toHaveBeenCalledOnce()
   })
+
+  it.each([
+    ['an error object', { error: { code: 502, message: 'Provider returned error' } }],
+    ['a choice that stopped with an error', reply('{"ok":', { finish_reason: 'error', error: { code: 502, message: 'Upstream disconnected' } })],
+  ])('retries a 200 that carries %s, rather than taking the text so far as the reply', async (_case, response) => {
+    const fetch = stubFetch(response, reply('{"ok":true}'))
+
+    expect((await new ChatClient(OPENAI, fetch).generateJson(REQUEST, data => data)).data).toEqual({ ok: true })
+    expect(warn.mock.calls[0]?.[0]).toContain('api.openai.com failed partway through the reply: {"code":502')
+  })
 })
 
 describe('ChatClient errors', () => {
@@ -221,6 +231,36 @@ describe('ChatClient errors', () => {
     await expect(new ChatClient(OPENAI, fetch).generateJson(REQUEST, data => data)).rejects.toMatchObject({
       message: 'api.openai.com returned HTTP 400: { "error": { "message": "messages too long" } }',
     })
+  })
+
+  it.each([
+    // How Gemini's free tier answered once its 500 requests for the day were used, with the help links cut.
+    ['Gemini', [{ error: { code: 429, message: 'You exceeded your current quota, please check your plan and billing details.\n* Quota exceeded for metric: generativelanguage.googleapis.com/generate_content_free_tier_requests, limit: 500, model: gemini-3.5-flash-lite\nPlease retry in 1h43m35.978604272s.', status: 'RESOURCE_EXHAUSTED', details: [{ '@type': 'type.googleapis.com/google.rpc.QuotaFailure', violations: [{ quotaId: 'GenerateRequestsPerDayPerProjectPerModel-FreeTier', quotaValue: '500' }] }, { '@type': 'type.googleapis.com/google.rpc.RetryInfo', retryDelay: '6215s' }] } }]],
+    ['OpenAI', { error: { message: 'Rate limit reached for gpt-6-luna in organization org-test on requests per day (RPD): Limit 200, Used 200, Requested 1.', type: 'requests', code: 'rate_limit_exceeded' } }],
+  ])('stops waiting on a used-up %s daily quota, which resets hours later', async (_provider, body) => {
+    const fetch = stubFetch(error(429, body))
+
+    const failure = await new ChatClient(OPENAI, fetch).generateJson(REQUEST, data => data).catch((err: unknown) => err)
+
+    expect(failure).toMatchObject({ kind: 'permanent' })
+    expect((failure as Error).message.endsWith(' The daily quota is used up.')).toBe(true)
+    expect(fetch).toHaveBeenCalledOnce()
+  })
+
+  it('keeps waiting out a per-minute quota', async () => {
+    const perMinute = [{ error: { code: 429, message: 'Quota exceeded for metric: generativelanguage.googleapis.com/generate_content_free_tier_requests, limit: 15', status: 'RESOURCE_EXHAUSTED', details: [{ violations: [{ quotaId: 'GenerateRequestsPerMinutePerProjectPerModel-FreeTier' }] }] } }]
+    const fetch = stubFetch(error(429, perMinute), reply('{"ok":true}'))
+
+    expect((await new ChatClient(OPENAI, fetch).generateJson(REQUEST, data => data)).data).toEqual({ ok: true })
+    expect(sleep.mock.calls.map(([ms]) => ms)).toEqual([10000])
+  })
+
+  it('fails only the item when OpenRouter\'s moderation refuses it, since the key is fine', async () => {
+    const body = { error: { code: 403, message: 'claude-haiku-5-5 requires moderation on OpenRouter. Your input was flagged for "harassment".', metadata: { reasons: ['harassment'] } } }
+    const fetch = stubFetch(error(403, body))
+
+    await expect(new ChatClient(OPENAI, fetch).generateJson(REQUEST, data => data)).rejects.toMatchObject({ kind: 'permanent' })
+    expect(fetch).toHaveBeenCalledOnce()
   })
 
   it('retries a server error twice, and fails any other 4xx at once', async () => {
