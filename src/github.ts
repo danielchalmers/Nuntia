@@ -16,8 +16,6 @@ export type IssueOrPullDetails = {
   state: string;
   labels: string[];
   type: 'issue' | 'pull';
-  owner: string;
-  repo: string;
 };
 
 export type ReleaseDetails = {
@@ -147,32 +145,20 @@ export class GitHubClient {
 
   private mapLabels(data: any): string[] {
     if (!Array.isArray(data?.labels)) return [];
-    const labels: string[] = [];
-
+    const labels = new Set<string>();
     for (const label of data.labels) {
-      if (typeof label === 'string') {
-        const trimmed = label.trim();
-        if (trimmed) labels.push(trimmed);
-        continue;
-      }
-
-      const rawName = label?.name;
-      if (typeof rawName === 'string') {
-        const trimmed = rawName.trim();
-        if (trimmed) labels.push(trimmed);
-      }
+      const name = typeof label === 'string' ? label : label?.name;
+      if (typeof name === 'string' && name.trim()) labels.add(name.trim());
     }
-
-    return Array.from(new Set(labels));
+    return Array.from(labels);
   }
 
   async compareCommits(
     base: string,
     head: string
-  ): Promise<{ commits: CommitDetails[]; status?: string; totalCommits?: number; files: string[]; filesTruncated: boolean }> {
+  ): Promise<{ commits: CommitDetails[]; totalCommits?: number; files: string[]; filesTruncated: boolean }> {
     const perPage = 100;
     let page = 1;
-    let status: string | undefined;
     let totalCommits: number | undefined;
     const commits: CommitDetails[] = [];
     const seenShas = new Set<string>();
@@ -194,9 +180,6 @@ export class GitHubClient {
         throw new Error(`GitHub can't compare ${base}...${head}, because one of them isn't in ${this.owner}/${this.repo}. If ${base} was deleted or renamed, fix the Full Changelog line in the release to name the previous release's tag.`);
       });
 
-      if (status === undefined && typeof data?.status === 'string') {
-        status = data.status;
-      }
       if (totalCommits === undefined && typeof data?.total_commits === 'number') {
         totalCommits = data.total_commits;
       }
@@ -234,7 +217,6 @@ export class GitHubClient {
       commits,
       files,
       filesTruncated,
-      ...(status !== undefined && { status }),
       ...(totalCommits !== undefined && { totalCommits }),
     };
   }
@@ -328,8 +310,6 @@ export class GitHubClient {
       state: data.pull_request?.merged_at ? 'merged' : data.state || 'open',
       labels: this.mapLabels(data),
       type: data.pull_request ? 'pull' : 'issue',
-      owner,
-      repo,
     };
   }
 }

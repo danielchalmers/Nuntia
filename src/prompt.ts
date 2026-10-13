@@ -57,12 +57,7 @@ async function fetchOnce(url: string): Promise<string> {
   return text;
 }
 
-export function buildPrompt(
-  context: ReleaseContext,
-  basePrompt: string
-): { systemPrompt: string; userPrompt: string } {
-  // The JSON is compact, because indentation costs tokens without telling the model anything.
-  const userPrompt = `=== RELEASE CONTEXT (JSON) ===\n${JSON.stringify(context)}\n`;
-
-  return { systemPrompt: basePrompt, userPrompt };
+/** The user message: the release context as compact JSON, because indentation costs tokens without telling the model anything. */
+export function contextMessage(context: ReleaseContext): string {
+  return `=== RELEASE CONTEXT (JSON) ===\n${JSON.stringify(context)}\n`;
 }

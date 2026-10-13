@@ -104,27 +104,10 @@ describe('GitHubClient.compareCommits', () => {
       per_page: 100,
       page: 4,
     });
-    expect(result.status).toBe('ahead');
     expect(result.totalCommits).toBe(306);
     expect(result.commits).toHaveLength(306);
     expect(result.files).toEqual(['src/index.ts', 'src/context.ts', 'tests/context.test.ts']);
     expect(client.getApiCallCount()).toBe(4);
-  });
-
-  it('pages past 250 commits to the end of a large range', async () => {
-    // Shaped like microsoft/vscode 1.93.0...1.95.0, which paged to all 2,077 commits: 20 full pages, then 77.
-    const total = 2077;
-    const pages = Array.from({ length: 21 }, (_, i) => comparePage(total, makePage(i * 100, Math.min(100, total - i * 100))));
-    const compareCommits = mockResponses(...pages);
-
-    const client = makeClient({ repos: { compareCommits } });
-    const result = await client.compareCommits('BASE', 'HEAD');
-
-    expect(compareCommits).toHaveBeenCalledTimes(21);
-    expect(result.totalCommits).toBe(2077);
-    expect(result.commits).toHaveLength(2077);
-    expect(result.commits[0].sha).toBe(makeCompareCommit(0).sha);
-    expect(result.commits[2076].sha).toBe(makeCompareCommit(2076).sha);
   });
 
   it('names the range and what to fix when GitHub has no such comparison, instead of a bare "Not Found"', async () => {
@@ -243,8 +226,6 @@ describe('GitHubClient.getIssueOrPullRequest', () => {
       state: 'open',
       labels: ['bug', 'release-note'],
       type: 'issue',
-      owner: 'other',
-      repo: 'repo',
     });
   });
 

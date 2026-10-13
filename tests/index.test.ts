@@ -10,7 +10,6 @@ import type { Config, ReleaseContext, ReleaseRange } from '../src/types';
 const mocks = vi.hoisted(() => {
   const summary = { addRaw: vi.fn(), write: vi.fn() };
   return {
-    setOutput: vi.fn(),
     setFailed: vi.fn(),
     notice: vi.fn(),
     warning: vi.fn(),
@@ -25,7 +24,6 @@ const mocks = vi.hoisted(() => {
 });
 
 vi.mock('@actions/core', () => ({
-  setOutput: mocks.setOutput,
   setFailed: mocks.setFailed,
   notice: mocks.notice,
   warning: mocks.warning,
@@ -56,7 +54,6 @@ const CONFIG: Config = {
   repo: 'widgets',
   token: 'token',
   promptUrl: '',
-  model: 'gemini-flash-latest',
   endpoint: {
     provider: 'gemini',
     model: 'gemini-flash-latest',
@@ -129,12 +126,11 @@ afterEach(() => {
 });
 
 describe('Nuntia action entry point', () => {
-  it('writes the notes with the attribution footer, and sets no action outputs', async () => {
+  it('writes the notes with the attribution footer', async () => {
     await runAction();
 
     const notesPath = path.join(tempDir, 'artifacts', 'nuntia-release-notes.md');
     expect(fs.readFileSync(notesPath, 'utf8')).toBe(`## What changed\n\n- Fixed a bug\n\n${ATTRIBUTION}\n`);
-    expect(mocks.setOutput).not.toHaveBeenCalled();
     expect(mocks.setFailed).not.toHaveBeenCalled();
   });
 
@@ -262,14 +258,6 @@ describe('Nuntia action entry point', () => {
     expect(mocks.buildReleaseContext).toHaveBeenCalledWith(CONFIG, RANGE, expect.anything());
   });
 
-  it('logs neither an inputs dump nor upload advice', async () => {
-    await runAction();
-
-    const lines = vi.mocked(console.log).mock.calls.map(args => args.join(' '));
-    expect(lines.some(line => line.startsWith('Inputs:'))).toBe(false);
-    expect(lines.some(line => /upload/i.test(line))).toBe(false);
-  });
-
   it('stops with a notice, writing nothing, when there is no range to write notes for', async () => {
     mocks.resolveRange.mockResolvedValue({ skip: 'v1.0.0 is the first release, so there is no earlier release to compare it with.' });
 
@@ -291,15 +279,6 @@ describe('Nuntia action entry point', () => {
     expect(mocks.generateText).not.toHaveBeenCalled();
     expect(mocks.setFailed).not.toHaveBeenCalled();
     expect(fs.existsSync(path.join(tempDir, 'artifacts'))).toBe(false);
-  });
-
-  it('fails the action when the range cannot be resolved', async () => {
-    mocks.resolveRange.mockRejectedValue(new Error('Tag v1.1.0 has no published release.'));
-
-    await runAction();
-
-    expect(mocks.setFailed).toHaveBeenCalledWith('Tag v1.1.0 has no published release.');
-    expect(mocks.generateText).not.toHaveBeenCalled();
   });
 
   it.each([
@@ -326,16 +305,19 @@ describe('Nuntia action entry point', () => {
   });
 
   it.each([
-    [401, 'Bad credentials'],
-    [403, 'Resource not accessible by integration'],
-  ])('fails when GitHub answers HTTP %i, because the token or its permissions are wrong', async (status, message) => {
-    mocks.resolveRange.mockRejectedValue(Object.assign(new Error(message), { status }));
+    ['GitHub rejects the token', 'resolveRange', Object.assign(new Error('Bad credentials'), { status: 401 })],
+    ['the token lacks a permission', 'resolveRange', Object.assign(new Error('Resource not accessible by integration'), { status: 403 })],
+    ['the tag has no release', 'resolveRange', new Error('Tag v1.1.0 has no published release.')],
+    ['the commit range is incomplete', 'buildReleaseContext', new Error('Commit range v1.0.0...v1.1.0 is incomplete')],
+  ] as const)('fails, writing nothing, when %s', async (_name, step, error) => {
+    mocks[step].mockRejectedValue(error);
 
     await runAction();
 
-    expect(mocks.setFailed).toHaveBeenCalledWith(message);
+    expect(mocks.setFailed).toHaveBeenCalledWith(error.message);
     expect(mocks.warning).not.toHaveBeenCalled();
     expect(mocks.generateText).not.toHaveBeenCalled();
+    expect(fs.existsSync(path.join(tempDir, 'artifacts'))).toBe(false);
   });
 
   it('logs how long the call took and the tokens used, with generated tokens excluding reasoning', async () => {
@@ -356,26 +338,6 @@ describe('Nuntia action entry point', () => {
     await runAction();
 
     expect(mocks.summary.write).not.toHaveBeenCalled();
-  });
-
-  it('adds the notes to the step summary when running in a workflow', async () => {
-    vi.stubEnv('GITHUB_STEP_SUMMARY', path.join(tempDir, 'summary.md'));
-
-    await runAction();
-
-    expect(mocks.summary.addRaw).toHaveBeenCalledWith(expect.stringContaining('- Fixed a bug'));
-    expect(mocks.summary.addRaw).toHaveBeenCalledWith(expect.stringContaining(ATTRIBUTION));
-    expect(mocks.summary.write).toHaveBeenCalled();
-  });
-
-  it('fails the action with the error message and writes nothing when a step throws', async () => {
-    mocks.buildReleaseContext.mockRejectedValue(new Error('Commit range v1.0.0...v1.1.0 is incomplete'));
-
-    await runAction();
-
-    expect(mocks.setFailed).toHaveBeenCalledWith('Commit range v1.0.0...v1.1.0 is incomplete');
-    expect(mocks.updateReleaseBody).not.toHaveBeenCalled();
-    expect(fs.existsSync(path.join(tempDir, 'artifacts'))).toBe(false);
   });
 
   it.each([

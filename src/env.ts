@@ -96,7 +96,6 @@ export function getConfig(): Config {
     repo,
     token,
     promptUrl,
-    model: endpoint.model,
     endpoint,
     trigger: readTrigger(),
   };

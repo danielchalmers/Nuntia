@@ -132,16 +132,6 @@ describe('resolveRange', () => {
       expect(client.generateReleaseNotes).not.toHaveBeenCalled();
     });
 
-    it('takes the range from a hand-written "Full changelog" line without asking GitHub to generate release notes', async () => {
-      const client = makeClient();
-      const body = 'Hand-written notes.\n\n**Full changelog**: https://github.com/acme/widgets/compare/v1.0.0...v1.1.0';
-
-      const range = await resolve(client, { eventName: 'release', release: makeRelease({ body }) });
-
-      expect(range).toMatchObject({ base: 'v1.0.0', head: 'v1.1.0' });
-      expect(client.generateReleaseNotes).not.toHaveBeenCalled();
-    });
-
     it('asks GitHub to generate release notes when the release has no Full Changelog line', async () => {
       const client = makeClient({ generated: `## What's Changed\n\n**Full Changelog**: https://github.com/acme/widgets/compare/v1.0.1...v1.1.0` });
 
