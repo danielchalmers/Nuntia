@@ -402,6 +402,15 @@ describe('Nuntia action entry point', () => {
     });
   });
 
+  it('cleans a refusal before the summary shows it, since it quotes the model', async () => {
+    vi.stubEnv('GITHUB_STEP_SUMMARY', path.join(tempDir, 'summary.md'));
+    mocks.generateText.mockRejectedValue(new ModelError('api.openai.com declined to answer: Ask @alice, or see ![x](https://evil.example/x.png)', 'permanent'));
+
+    await runAction();
+
+    expect(mocks.summary.addRaw).toHaveBeenCalledWith('No release notes were written: api.openai.com declined to answer: Ask `@alice`, or see \n');
+  });
+
   it('fails, keeping the debug artifacts but writing no notes or summary, when the provider rejects the key', async () => {
     vi.stubEnv('GITHUB_STEP_SUMMARY', path.join(tempDir, 'summary.md'));
     const message = 'generativelanguage.googleapis.com returned HTTP 401: API key not valid. Check GEMINI_API_KEY.';

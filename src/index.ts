@@ -77,7 +77,8 @@ async function run(): Promise<void> {
     // Of the provider's failures, only a rejected key, an unknown model or a billing problem fails the run.
     // An outage, a timeout or a bad reply is the provider's problem, and a red run would notify the maintainer about it.
     if (!(err instanceof ModelError) || err.kind === 'fatal') throw err;
-    await stopWithWarning(`No release notes were written: ${err.message}`);
+    // A refusal quotes the model, and the job summary renders it, so it's cleaned like the notes.
+    await stopWithWarning(`No release notes were written: ${sanitizeNotes(err.message, cfg.owner, cfg.repo)}`);
     return;
   }
   const { text, inputTokens, outputTokens } = reply;

@@ -127,6 +127,17 @@ describe('GitHubClient.compareCommits', () => {
     expect(result.commits[2076].sha).toBe(makeCompareCommit(2076).sha);
   });
 
+  it('names the range and what to fix when GitHub has no such comparison, instead of a bare "Not Found"', async () => {
+    const client = makeClient({ repos: { compareCommits: vi.fn().mockRejectedValue(httpError(404)) } });
+
+    await expect(client.compareCommits('v1.0.0', 'v1.1.0')).rejects.toThrow(
+      "GitHub can't compare v1.0.0...v1.1.0, because one of them isn't in acme/widgets. If v1.0.0 was deleted or renamed, fix the Full Changelog line in the release to name the previous release's tag."
+    );
+
+    const failing = makeClient({ repos: { compareCommits: vi.fn().mockRejectedValue(httpError(500)) } });
+    await expect(failing.compareCommits('v1.0.0', 'v1.1.0')).rejects.toMatchObject({ status: 500 });
+  });
+
   it('stops once total_commits is reached without fetching an empty trailing page', async () => {
     const compareCommits = mockResponses(
       comparePage(300, makePage(0, 100)),
