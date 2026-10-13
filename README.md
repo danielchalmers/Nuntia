@@ -61,8 +61,8 @@ To preview the next release's notes at any time, run the workflow from a branch 
 ## How it works
 
 - Nuntia follows up to 5 references from each commit, 2 levels deep, and reads everything through the GitHub API, so the job needs no checkout.
-- A very large release gets less context: Nuntia stops following references after 300 GitHub API calls, and trims what it read until it fits in 360,000 characters.
-- A GitHub rate limit or outage never fails the run. Nuntia writes notes from what it could read, or leaves a warning if it couldn't read the release at all.
+- A very large release gets less context: Nuntia stops following references after 300 GitHub API calls, and trims the linked issues and pull requests until the context fits in 360,000 characters. Commit messages are never cut, so a release whose commits alone are larger is sent anyway, with a warning.
+- A GitHub rate limit or outage doesn't fail a release's run. Nuntia writes notes from what it could read, or leaves a warning if it couldn't read the release at all.
 
 ## Prompt
 
@@ -95,4 +95,4 @@ To try your own prompt without committing it, host it at a raw URL, such as a gi
 
 The notes go into the release and the job summary. The `artifacts/` directory holds them, along with the payload and context Nuntia sent. Upload it with `actions/upload-artifact` to keep it.
 
-A run fails only when something needs fixing: invalid configuration, a rejected key or unknown model, missing permissions, or a prompt URL that can't be fetched. A slow or overloaded provider, a refusal, or notes cut off at the output limit only leave a warning, so re-run the job to try again.
+A run fails only when something needs fixing: invalid configuration, a rejected key or unknown model, missing permissions, a prompt URL that can't be fetched, or a Full Changelog line naming a tag that no longer exists. A slow or overloaded provider, a refusal, or notes cut off at the output limit only leave a warning, so re-run the job to try again.

@@ -188,6 +188,10 @@ export class GitHubClient {
         head,
         per_page: perPage,
         page,
+      }).catch((error: unknown) => {
+        // GitHub answers a range with a missing end with a bare "Not Found", which doesn't say which end or what to fix.
+        if (httpStatus(error) !== 404) throw error;
+        throw new Error(`GitHub can't compare ${base}...${head}, because one of them isn't in ${this.owner}/${this.repo}. If ${base} was deleted or renamed, fix the Full Changelog line in the release to name the previous release's tag.`);
       });
 
       if (status === undefined && typeof data?.status === 'string') {
