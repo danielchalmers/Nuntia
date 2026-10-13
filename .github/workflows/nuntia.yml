@@ -1,0 +1,36 @@
+name: Nuntia (Release Notes)
+
+# Nuntia writes its own release notes, running the action as it is at the release's tag.
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      prompt-url:
+        description: "Raw prompt URL to try (blank uses the bundled prompt)"
+        required: false
+        default: ""
+
+jobs:
+  release-notes:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # Writes the notes into the release.
+      issues: read
+      pull-requests: read
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: ./
+        with:
+          prompt-url: ${{ inputs.prompt-url }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+
+      - if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: nuntia-${{ github.run_number }}
+          path: artifacts
+          if-no-files-found: ignore
