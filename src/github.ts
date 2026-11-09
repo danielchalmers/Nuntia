@@ -1,6 +1,4 @@
-import * as core from '@actions/core';
 import * as github from '@actions/github';
-import { throttling } from '@octokit/plugin-throttling';
 
 export type CommitDetails = {
   sha: string;
@@ -36,28 +34,22 @@ const NEWEST_TAG_QUERY = `query($owner: String!, $repo: String!) {
   }
 }`;
 
-// A rate limit that lifts within this many seconds is waited out.
-// A longer wait, such as for an hourly quota that has run out, could hold the job for up to an hour, so the request fails instead.
-const MAX_RATE_LIMIT_WAIT_SECONDS = 60;
-// How many times one request is sent again after a rate limit.
-const MAX_RATE_LIMIT_RETRIES = 3;
-
 /** The HTTP status of a failed GitHub request, if it has one. */
 export function httpStatus(error: unknown): number | undefined {
   return typeof error === 'object' && error !== null && 'status' in error && typeof error.status === 'number' ? error.status : undefined;
 }
 
 /**
- * Whether a GitHub request failed on a rate limit that wasn't waited out.
+ * Whether a GitHub request failed on a rate limit.
  * A 403 counts only when GitHub says it's a rate limit, because any other 403 means the token is missing a permission.
  */
 export function isRateLimited(error: unknown): boolean {
   if (typeof error !== 'object' || error === null) return false;
-  const response: any = 'response' in error ? error.response : undefined;
-  // The throttling plugin throws a GraphQL rate limit without a status.
-  const errors: unknown = response?.data?.errors;
+  // GitHub can answer a GraphQL query over the limit with HTTP 200 and a RATE_LIMITED error, which Octokit throws as a GraphqlResponseError without a status.
+  const errors: unknown = 'errors' in error ? error.errors : undefined;
   if (Array.isArray(errors) && errors.some(item => item?.type === 'RATE_LIMITED')) return true;
 
+  const response: any = 'response' in error ? error.response : undefined;
   const status = httpStatus(error);
   if (status === 429) return true;
   if (status !== 403) return false;
@@ -71,24 +63,6 @@ export function isRateLimited(error: unknown): boolean {
 export function isTransientFailure(error: unknown): boolean {
   const status = httpStatus(error);
   return isRateLimited(error) || status === 408 || (status !== undefined && status >= 500);
-}
-
-/**
- * The throttling plugin's answer to a rate limit: whether to wait retryAfter seconds and send the request again.
- * It gives up on a long wait at once, and the caller decides whether the failed request ends the run.
- */
-function retryRateLimit(what: string, retryAfter: number, options: { method: string; url: string }, retryCount: number): boolean {
-  const request = `${options.method} ${options.url}`;
-  if (retryAfter > MAX_RATE_LIMIT_WAIT_SECONDS) {
-    console.log(`${what} for ${request}, and it resets in ${retryAfter}s, which is too long to wait, so the request fails.`);
-    return false;
-  }
-  if (retryCount >= MAX_RATE_LIMIT_RETRIES) {
-    console.log(`${what} for ${request} again after ${MAX_RATE_LIMIT_RETRIES} retries, so the request fails.`);
-    return false;
-  }
-  core.warning(`${what} for ${request}; retrying in ${retryAfter}s (attempt ${retryCount + 1} of ${MAX_RATE_LIMIT_RETRIES}).`);
-  return true;
 }
 
 /**
@@ -112,18 +86,9 @@ export class GitHubClient {
   private octokit;
   private apiCallCount = 0;
 
+  // Each request is sent once. A rate limit fails it at once, and the callers warn and stop, as they do for an outage.
   constructor(token: string, private owner: string, private repo: string) {
-    // Register the throttling plugin so GitHub API calls wait out a short rate limit instead of failing.
-    this.octokit = github.getOctokit(
-      token,
-      {
-        throttle: {
-          onRateLimit: (retryAfter, options, _octokit, retryCount) => retryRateLimit("GitHub's request quota ran out", retryAfter, options, retryCount),
-          onSecondaryRateLimit: (retryAfter, options, _octokit, retryCount) => retryRateLimit("GitHub's secondary rate limit was hit", retryAfter, options, retryCount),
-        },
-      },
-      throttling
-    );
+    this.octokit = github.getOctokit(token);
   }
 
   /** The requests this client has sent so far in the run, which the release context spends as its budget. */
