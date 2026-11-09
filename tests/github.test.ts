@@ -1,18 +1,13 @@
 import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
-import { afterAll, afterEach, beforeAll, beforeEach, describe, it, expect, vi } from 'vitest';
-import * as core from '@actions/core';
+import { afterAll, beforeAll, beforeEach, describe, it, expect, vi } from 'vitest';
 import * as github from '@actions/github';
 import { GitHubClient, isRateLimited, isTransientFailure } from '../src/github';
 
-// Capture the octokit options (for the throttle callbacks) and keep rate-limit warnings out of the test log as ::warning:: commands.
+// Stub getOctokit so each test chooses what the client talks to: makeClient swaps in endpoint stubs, and makeRealClient points the real Octokit at a local server.
 vi.mock('@actions/github', async (importActual) => {
   const actual = await importActual<typeof import('@actions/github')>();
   return { ...actual, getOctokit: vi.fn(() => ({})) };
-});
-vi.mock('@actions/core', async (importActual) => {
-  const actual = await importActual<typeof import('@actions/core')>();
-  return { ...actual, warning: vi.fn() };
 });
 
 function makeCompareCommit(index: number) {
@@ -347,45 +342,6 @@ describe('GitHubClient releases', () => {
   });
 });
 
-describe('GitHubClient rate limiting', () => {
-  const request = { method: 'GET', url: '/repos/{owner}/{repo}/compare/{basehead}' };
-
-  function throttleOptions() {
-    new GitHubClient('token', 'acme', 'widgets');
-    const options = vi.mocked(github.getOctokit).mock.lastCall?.[1] as any;
-    return options.throttle;
-  }
-
-  beforeEach(() => {
-    vi.mocked(core.warning).mockClear();
-    vi.spyOn(console, 'log').mockImplementation(() => {});
-  });
-
-  afterEach(() => {
-    vi.mocked(console.log).mockRestore();
-  });
-
-  it.each(['onRateLimit', 'onSecondaryRateLimit'])('%s waits out a limit that lifts within 60 seconds, up to three times', (callback) => {
-    const handler = throttleOptions()[callback];
-
-    expect([0, 1, 2, 3].map(retryCount => handler(60, request, {}, retryCount))).toEqual([true, true, true, false]);
-    expect(core.warning).toHaveBeenCalledTimes(3);
-    expect(core.warning).toHaveBeenLastCalledWith(expect.stringContaining('GET /repos/{owner}/{repo}/compare/{basehead}; retrying in 60s (attempt 3 of 3).'));
-    expect(console.log).toHaveBeenCalledWith(expect.stringContaining('GET /repos/{owner}/{repo}/compare/{basehead} again after 3 retries, so the request fails.'));
-  });
-
-  it.each(['onRateLimit', 'onSecondaryRateLimit'])('%s gives up at once on a longer wait, such as for the hourly quota to reset', (callback) => {
-    const handler = throttleOptions()[callback];
-
-    expect(handler(61, request, {}, 0)).toBe(false);
-    expect(handler(1170, request, {}, 0)).toBe(false);
-    expect(core.warning).not.toHaveBeenCalled();
-    expect(console.log).toHaveBeenLastCalledWith(
-      expect.stringContaining('GET /repos/{owner}/{repo}/compare/{basehead}, and it resets in 1170s, which is too long to wait, so the request fails.')
-    );
-  });
-});
-
 describe('isRateLimited and isTransientFailure', () => {
   // Shaped like Octokit's RequestError, which keeps the response's headers and body.
   function requestError(status: number, message: string, headers: Record<string, string> = {}) {
@@ -396,7 +352,8 @@ describe('isRateLimited and isTransientFailure', () => {
     ['the hourly quota running out', requestError(403, 'API rate limit exceeded for installation ID 1.', { 'x-ratelimit-remaining': '0' })],
     ['a secondary rate limit', requestError(403, 'You have exceeded a secondary rate limit. Please wait a few minutes before you try again.')],
     ['HTTP 429', requestError(429, 'Too Many Requests')],
-    ['a GraphQL rate limit', Object.assign(new Error('GraphQL Rate Limit Exceeded'), { response: { data: { errors: [{ type: 'RATE_LIMITED' }] } } })],
+    // Shaped like Octokit's GraphqlResponseError, which has no status.
+    ['a GraphQL rate limit', Object.assign(new Error('API rate limit exceeded for installation ID 1.'), { errors: [{ type: 'RATE_LIMITED' }] })],
   ])('reads %s as a rate limit, which is transient', (_name, error) => {
     expect(isRateLimited(error)).toBe(true);
     expect(isTransientFailure(error)).toBe(true);
@@ -422,7 +379,7 @@ describe('isRateLimited and isTransientFailure', () => {
   });
 });
 
-// The real Octokit and throttling plugin against a local stand-in for the GitHub API, which shows how long a rate-limited request really waits.
+// The real Octokit against a local stand-in for the GitHub API, which shows that a rate-limited request fails at once and reads as a rate limit.
 describe('GitHubClient against a rate-limited API', () => {
   type Reply = { status: number; headers?: Record<string, string>; body: unknown };
   const COMMIT = { sha: 'abc1234', commit: { message: 'Fix the cache' }, html_url: 'https://github.com/acme/widgets/commit/abc1234' };
@@ -448,11 +405,6 @@ describe('GitHubClient against a rate-limited API', () => {
 
   beforeEach(() => {
     requests = 0;
-    vi.spyOn(console, 'log').mockImplementation(() => {});
-  });
-
-  afterEach(() => {
-    vi.mocked(console.log).mockRestore();
   });
 
   // The client gets the real getOctokit, pointed at the local server.
@@ -464,7 +416,7 @@ describe('GitHubClient against a rate-limited API', () => {
     return new GitHubClient('token', 'acme', 'widgets');
   }
 
-  it('fails at once when the quota resets in an hour, instead of waiting for it', async () => {
+  it('fails at once when the quota resets in an hour', async () => {
     const reset = String(Math.floor(Date.now() / 1000) + 3600);
     const client = await makeRealClient({
       status: 403,
@@ -476,16 +428,30 @@ describe('GitHubClient against a rate-limited API', () => {
 
     expect(isRateLimited(error)).toBe(true);
     expect(requests).toBe(1);
-    expect(console.log).toHaveBeenCalledWith(expect.stringMatching(/^GitHub's request quota ran out for GET .+, and it resets in 360\ds, which is too long to wait, so the request fails\.$/));
   });
 
-  it('waits out a one-second secondary rate limit, then reads the commit', async () => {
+  it('fails at once on a secondary rate limit, even one that lifts in a second', async () => {
     const client = await makeRealClient(
       { status: 403, headers: { 'retry-after': '1' }, body: { message: 'You have exceeded a secondary rate limit.' } },
       { status: 200, body: COMMIT }
     );
 
-    expect(await client.getCommit('acme', 'widgets', 'abc1234')).toEqual({ sha: 'abc1234', message: 'Fix the cache', url: COMMIT.html_url });
-    expect(requests).toBe(2);
+    const error = await client.getCommit('acme', 'widgets', 'abc1234').catch((caught: unknown) => caught);
+
+    expect(isRateLimited(error)).toBe(true);
+    expect(requests).toBe(1);
+  });
+
+  it('reads a GraphQL reply with a RATE_LIMITED error as a rate limit', async () => {
+    const client = await makeRealClient({
+      status: 200,
+      body: { data: null, errors: [{ type: 'RATE_LIMITED', message: 'API rate limit exceeded for installation ID 1.' }] },
+    });
+
+    const error = await client.findNewestTag().catch((caught: unknown) => caught);
+
+    expect(isRateLimited(error)).toBe(true);
+    expect(isTransientFailure(error)).toBe(true);
+    expect(requests).toBe(1);
   });
 });
