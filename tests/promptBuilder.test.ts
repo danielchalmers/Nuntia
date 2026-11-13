@@ -103,6 +103,25 @@ describe('loadPrompt', () => {
     expect(text).toContain("Match the examples' voice and formatting, and follow the shape of the one closer to this release.");
   });
 
+  it("tells the model to keep to what sells the release or warns about it, and leave the rest to GitHub's list", async () => {
+    const { text } = await loadPrompt('');
+
+    expect(text).toContain('a change earns a place in these notes only by doing one of those two jobs.');
+    expect(text).toContain('A type of change is not a highlight.');
+    expect(text).toContain('An upgrading note is for a change that a typical app using the feature will hit');
+    expect(text).toContain("A `breaking change` label alone doesn't earn a note");
+    expect(text).toContain("Never give a number that isn't in the data.");
+  });
+
+  it('keeps the headline for a major release, and caps the bullets, references and length of a smaller one', async () => {
+    const { text } = await loadPrompt('');
+
+    expect(text).toContain('1. Headline: for a major release only');
+    expect(text).toContain('Otherwise use bullets, and no more than 3 of them');
+    expect(text).toContain('no more than 4 for a bullet');
+    expect(text).toContain("Keep a minor or patch release's notes under 200 words, not counting references.");
+  });
+
   it('fetches the prompt from the url with a timeout', async () => {
     const fetchMock = stubFetch({ body: 'Test prompt content' });
 
@@ -208,13 +227,26 @@ describe("the bundled prompt's worked examples", () => {
     expect(minor).not.toMatch(/^\d+\. /m);
   });
 
-  it('end every bullet and step with links to its pull requests or issues', async () => {
+  it('show a minor release as no more than 3 upgrading bullets, and under 200 words without its references', async () => {
+    const { minor } = await examples();
+    const upgrading = (minor.split('## Upgrading\n')[1] ?? '').split('\n').filter(line => line.startsWith('- '));
+    const words = minor
+      .replace(/\[#\d+\]\([^)]*\)/g, '')
+      .split(/\s+/)
+      .filter(word => /\w/.test(word));
+
+    expect(upgrading.length).toBeGreaterThanOrEqual(1);
+    expect(upgrading.length).toBeLessThanOrEqual(3);
+    expect(words.length).toBeLessThan(200);
+  });
+
+  it('end every bullet and step with links to no more than 4 of its pull requests or issues', async () => {
     const reference = String.raw`\[#\d+\]\(https://github\.com/MudBlazor/MudBlazor/(?:pull|issues)/\d+\)`;
     for (const notes of Object.values(await examples())) {
       const items = notes.split('\n').filter(line => /^(?:- |\d+\. )/.test(line));
 
       expect(items.length).toBeGreaterThan(0);
-      for (const item of items) expect(item).toMatch(new RegExp(String.raw`\(${reference}(?:, ${reference})*\)$`));
+      for (const item of items) expect(item).toMatch(new RegExp(String.raw`\(${reference}(?:, ${reference}){0,3}\)$`));
     }
   });
 });
