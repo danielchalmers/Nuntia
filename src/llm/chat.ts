@@ -50,13 +50,22 @@ const INITIAL_BACKOFF_MS = 5_000;
 // Worst case per call: 10 + 20 + 40 + 60 + 60 + 60 = 250 seconds of waiting out an overload.
 const CAPACITY_RETRIES = 6;
 
+// Claude is called through its own Messages API, because its Chat Completions layer ignores reasoning_effort and so leaves Haiku at medium effort.
+const CLAUDE_HOST = 'api.anthropic.com';
+const CLAUDE_API_VERSION = '2026-10-21';
+const CLAUDE_EFFORT = 'xhigh';
+// The Messages API requires a limit, and at xhigh a lower one can cut the reply off partway through the reasoning.
+const CLAUDE_MAX_TOKENS = 64_000;
+
 // Hosts that enforce response_format, so the schema isn't also written into the prompt.
-// Claude's compatibility layer enforces it too but still gets the schema note, because it ignores reasoning_effort and the note makes Claude reason about twice as long: in a MudBlazor dry run, Haiku caught 82% of the due inactivity actions with the note and 36–42% without it.
+// Claude enforces its schema too but still gets the schema note, which the prompts were measured with: in a MudBlazor dry run at medium effort, Haiku caught 82% of the due inactivity actions with the note and 36–42% without it.
 const SCHEMA_ENFORCING_HOSTS = new Set(['api.openai.com', 'generativelanguage.googleapis.com']);
-const BUILT_IN_HOSTS = new Set([...SCHEMA_ENFORCING_HOSTS, 'api.anthropic.com']);
+const BUILT_IN_HOSTS = new Set([...SCHEMA_ENFORCING_HOSTS, CLAUDE_HOST]);
 
 // Request parameters a host may reject. Each one a host rejects is left off for the rest of the run.
-type OptionalParameter = 'response_format' | 'reasoning_effort';
+// `effort` is Claude's, inside output_config, and older Claude models reject it.
+const OPTIONAL_PARAMETERS = ['response_format', 'reasoning_effort', 'effort'] as const;
+type OptionalParameter = typeof OPTIONAL_PARAMETERS[number];
 
 const BILLING_ERROR = /insufficient_quota|credit.balance|spend.limit|usage.limit/i;
 // Gemini answers a bad key with a 400 rather than a 401, worded differently by each of its APIs.
@@ -89,9 +98,9 @@ export function createModelFetch(dispatcherTimeoutMs = 0): Fetch {
   return modelFetch as Fetch;
 }
 
-// The reasoning a JSON call gets on a host, as the startup log states it. Claude's compatibility layer accepts reasoning_effort but ignores it, and a host outside the built-in ones may or may not honor it.
+// The reasoning a JSON call gets on a host, as the startup log states it. A host outside the built-in ones may or may not honor reasoning_effort.
 export function describeReasoning(host: string): string {
-  if (host === 'api.anthropic.com') return `reasoning: provider default (${host} ignores reasoning_effort)`;
+  if (host === CLAUDE_HOST) return `reasoning: ${CLAUDE_EFFORT}`;
   return BUILT_IN_HOSTS.has(host) ? 'reasoning: high' : `reasoning: high if ${host} honors reasoning_effort`;
 }
 
@@ -151,11 +160,42 @@ function readReply(response: unknown, host: string): { text: string; usage: Usag
   };
 }
 
+// A Messages API reply, whose text comes in blocks alongside the thinking blocks.
+function readClaudeReply(response: unknown, host: string): { text: string; usage: Usage } {
+  const message = asRecord(response);
+  if (message.stop_reason === 'refusal') {
+    const explanation = asRecord(message.stop_details).explanation;
+    throw new ModelError(`${host} declined to answer${typeof explanation === 'string' && explanation.trim() ? `: ${explanation.trim()}` : ''}`, 'permanent');
+  }
+  if (message.stop_reason === 'max_tokens') throw new ModelError(`${host} stopped the reply at the output token limit`, 'permanent');
+
+  const blocks = Array.isArray(message.content) ? message.content : [];
+  const text = blocks.map(block => asRecord(block)).filter(block => block.type === 'text').map(block => String(block.text)).join('').trim();
+  if (!text) throw new ModelError(`${host} responded with empty text`);
+
+  const usage = asRecord(message.usage);
+  const cachedInputTokens = count(usage.cache_read_input_tokens);
+  // output_tokens includes the thinking, which is broken out only on some replies.
+  const reasoningTokens = count(asRecord(usage.output_tokens_details).thinking_tokens);
+  return {
+    text,
+    usage: {
+      // input_tokens leaves out what was read from or written to the cache.
+      inputTokens: count(usage.input_tokens) + cachedInputTokens + count(usage.cache_creation_input_tokens),
+      cachedInputTokens,
+      outputTokens: Math.max(0, count(usage.output_tokens) - reasoningTokens),
+      reasoningTokens,
+    },
+  };
+}
+
 // The optional parameter a rejected request names, if any: in the error's `param` field when it has one, as OpenAI-style errors do, or else anywhere in its text.
 function rejectedParameter(message: string, body: Record<string, unknown>): OptionalParameter | undefined {
   const text = /"param"\s*:\s*"([^"]+)"/.exec(message)?.[1] ?? message;
-  return (['response_format', 'reasoning_effort'] as const)
-    .find(name => name in body && (text.includes(name) || (name === 'response_format' && text.includes('json_schema'))));
+  return OPTIONAL_PARAMETERS.find(name => {
+    if (name === 'effort') return 'effort' in asRecord(body.output_config) && text.includes(name);
+    return name in body && (text.includes(name) || (name === 'response_format' && text.includes('json_schema')));
+  });
 }
 
 function schemaNote(schema: object): string {
@@ -167,7 +207,7 @@ function schemaNote(schema: object): string {
   ].join('\n');
 }
 
-/** A Chat Completions client, for OpenAI and every service with an OpenAI-compatible API. */
+/** A Chat Completions client, for OpenAI and every service with an OpenAI-compatible API, which calls Claude through its Messages API. */
 export class ChatClient {
   private readonly endpoint: Pick<Endpoint, 'baseUrl' | 'host' | 'apiKey' | 'keyName'>;
   private readonly fetch: Fetch;
@@ -176,6 +216,10 @@ export class ChatClient {
   constructor(endpoint: Pick<Endpoint, 'baseUrl' | 'host' | 'apiKey' | 'keyName'>, fetch: Fetch = createModelFetch()) {
     this.endpoint = endpoint;
     this.fetch = fetch;
+  }
+
+  private get claude(): boolean {
+    return this.endpoint.host === CLAUDE_HOST;
   }
 
   // Ends early when the call's deadline passes.
@@ -205,12 +249,21 @@ export class ChatClient {
     });
   }
 
-  // Call the model for a plain text reply, at its default reasoning settings.
+  // Call the model for a plain text reply, at its default reasoning settings, except that Claude gets the effort a JSON call gets, because Haiku's default is medium.
   generateText(request: ChatRequest): Promise<{ text: string } & Usage> {
     return this.withRetries(deadline => this.complete(() => this.textBody(request), deadline).then(({ text, usage }) => ({ text, ...usage })));
   }
 
   private textBody(request: ChatRequest): Record<string, unknown> {
+    if (this.claude) {
+      return {
+        model: request.model,
+        max_tokens: CLAUDE_MAX_TOKENS,
+        ...(request.systemPrompt ? { system: request.systemPrompt } : {}),
+        messages: [{ role: 'user', content: request.userPrompt }],
+        ...(this.dropped.has('effort') ? {} : { output_config: { effort: CLAUDE_EFFORT } }),
+      };
+    }
     return {
       model: request.model,
       messages: [
@@ -223,6 +276,15 @@ export class ChatClient {
   private jsonBody(request: JsonRequest): Record<string, unknown> {
     const enforced = SCHEMA_ENFORCING_HOSTS.has(this.endpoint.host) && !this.dropped.has('response_format');
     const userPrompt = enforced ? request.userPrompt : `${request.userPrompt.trimEnd()}\n\n${schemaNote(request.schema)}`;
+    if (this.claude) {
+      return {
+        ...this.textBody({ ...request, userPrompt }),
+        output_config: {
+          format: { type: 'json_schema', schema: request.schema },
+          ...(this.dropped.has('effort') ? {} : { effort: CLAUDE_EFFORT }),
+        },
+      };
+    }
     return {
       ...this.textBody({ ...request, userPrompt }),
       ...(this.dropped.has('response_format') ? {} : { response_format: { type: 'json_schema', json_schema: { name: 'response', strict: true, schema: request.schema } } }),
@@ -245,7 +307,7 @@ export class ChatClient {
         console.warn(`${this.endpoint.host} rejected ${rejected}, so it is left off for the rest of the run: ${errorMessage(err)}`);
         continue;
       }
-      return readReply(response, this.endpoint.host);
+      return this.claude ? readClaudeReply(response, this.endpoint.host) : readReply(response, this.endpoint.host);
     }
   }
 
@@ -258,9 +320,12 @@ export class ChatClient {
     const heartbeat = setInterval(() => console.log(`Still waiting for ${host} after ${++beats * HEARTBEAT_MS / 60_000} min...`), HEARTBEAT_MS);
     heartbeat.unref();
     try {
-      const response = await this.fetch(`${baseUrl}/chat/completions`, {
+      const response = await this.fetch(`${baseUrl}/${this.claude ? 'messages' : 'chat/completions'}`, {
         method: 'POST',
-        headers: { 'content-type': 'application/json', ...(apiKey ? { authorization: `Bearer ${apiKey}` } : {}) },
+        headers: {
+          'content-type': 'application/json',
+          ...(this.claude ? { 'anthropic-version': CLAUDE_API_VERSION, ...(apiKey ? { 'x-api-key': apiKey } : {}) } : apiKey ? { authorization: `Bearer ${apiKey}` } : {}),
+        },
         body: JSON.stringify(body),
         // Redirects are refused, so the key and the prompt can't be sent on to a host the user didn't pick.
         redirect: 'manual',
