@@ -41,7 +41,7 @@ Start with the smallest useful context:
 - `src/prompt.ts` - loads the bundled prompt or the one at `prompt-url` (a 30-second timeout and two retries), and puts the compact context JSON in the user prompt.
 - `src/sanitize.ts` - cleans the notes: removes raw HTML, images and Nuntia's markers, wraps @mentions and outside bare URLs in backticks, and keeps only the text of links outside the repository.
 - `src/publish.ts` - reads the release again and splices the notes between Nuntia's markers, warning instead of writing when the markers are broken, the body would pass 125,000 characters, the release is gone, or GitHub fails transiently. HTTP 401 and any other 403 fail the run, because the workflow lacks `contents: write`.
-- `src/llm/` - the model API boundary, copied from AutoTriage (see Change Rules). `endpoint.ts` picks the Chat Completions endpoint and key for the `model` input, and `chat.ts` is the one client every provider goes through, with its retries, call deadline and failure kinds.
+- `src/llm/` - the model API boundary, copied from AutoTriage (see Change Rules). `endpoint.ts` picks the endpoint and key for the `model` input, and `chat.ts` is the one client every provider goes through, with its retries, call deadline and failure kinds. It speaks Chat Completions to every host except `api.anthropic.com`, which gets Claude's own Messages API at `xhigh` effort, since Claude's Chat Completions layer ignores `reasoning_effort`.
 - `examples/Nuntia.prompt` - the bundled prompt: a short brief plus a major and a minor worked example.
 - `examples/workflows/nuntia.yml` - the example workflow that the README quick start shows.
 - `tests/` - Vitest files named after the modules they cover, with `tests/promptBuilder.test.ts` for `src/prompt.ts`, `tests/index.test.ts` for the entry point, `tests/llm/` for the shared layer, and `tests/setup.ts` for the test environment.
@@ -82,7 +82,7 @@ CI is the single workflow `.github/workflows/ci.yml`, which runs on pushes to `m
 - The `mock` job then runs `dist/index.js` with a synthetic `release` event for a fixed past range, PRs #45 to #53 (`86c7d7a...2fb4038`), with `claude-haiku-5-5` through `ANTHROPIC_API_KEY`, and uploads `artifacts/`. The range never grows, so each run costs about 16 GitHub API calls and 26K input tokens.
 - The mock's permissions are read-only, so it can't write into a release, and it ends with one expected warning that the release no longer exists. Fork pull requests skip it, because they get no secrets.
 - The mock bypasses `action.yml` and the preview path, so `tests/env.test.ts` checks that `action.yml` declares exactly the inputs `getConfig` reads and runs `dist/index.js` on Node 24, and `tests/release.test.ts` covers the preview.
-- CI calls no other model. There is no Gemini or OpenAI step, because every provider goes through the same Chat Completions client, which `tests/llm/` covers.
+- CI calls no other model. There is no Gemini or OpenAI step, because every provider goes through the same client, whose Chat Completions path `tests/llm/` covers.
 
 ## Development Commands
 
