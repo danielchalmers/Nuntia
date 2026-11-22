@@ -12,6 +12,10 @@ function reply(content: unknown, extra: Record<string, unknown> = {}) {
   return { choices: [{ message: { role: 'assistant', content }, finish_reason: 'stop', ...extra }], usage: { prompt_tokens: 100, completion_tokens: 30 } }
 }
 
+function claudeReply(text: string, extra: Record<string, unknown> = {}) {
+  return { content: [{ type: 'thinking', thinking: '' }, { type: 'text', text }], stop_reason: 'end_turn', usage: { input_tokens: 100, output_tokens: 30 }, ...extra }
+}
+
 // Answers each request with the next response, and records the request bodies, so no request leaves the process.
 function stubFetch(...responses: Array<unknown | Response>): Fetch & { bodies: any[] } {
   const bodies: any[] = []
@@ -66,15 +70,62 @@ describe('ChatClient requests', () => {
     })
   })
 
-  it('also writes the schema into Claude\'s prompt, because the note makes Claude reason longer', async () => {
-    const fetch = stubFetch(reply('{"ok":true}'))
+  it('asks Claude through its Messages API for strict JSON at xhigh effort, with the schema in the prompt too', async () => {
+    const fetch = stubFetch(claudeReply('{"ok":true}'))
 
-    await new ChatClient(CLAUDE, fetch).generateJson(REQUEST, data => data)
+    const result = await new ChatClient(CLAUDE, fetch).generateJson(REQUEST, data => data)
 
-    const userPrompt: string = fetch.bodies[0].messages[1].content
-    expect(userPrompt.startsWith('user\n\n=== SECTION: RESPONSE FORMAT ===')).toBe(true)
-    expect(userPrompt.endsWith(JSON.stringify(SCHEMA))).toBe(true)
-    expect(fetch.bodies[0].response_format).toBeDefined()
+    expect(result.data).toEqual({ ok: true })
+    const [url, init] = vi.mocked(fetch).mock.calls[0]!
+    expect(url).toBe('https://api.anthropic.com/v1/messages')
+    expect(init?.headers).toEqual({ 'content-type': 'application/json', 'anthropic-version': '2026-10-21', 'x-api-key': 'test-key' })
+    const { messages, ...body } = fetch.bodies[0]
+    expect(body).toEqual({
+      model: 'test-model',
+      max_tokens: 64000,
+      system: 'system',
+      output_config: { format: { type: 'json_schema', schema: SCHEMA }, effort: 'xhigh' },
+    })
+    expect(messages).toHaveLength(1)
+    expect(messages[0].role).toBe('user')
+    expect(messages[0].content.startsWith('user\n\n=== SECTION: RESPONSE FORMAT ===')).toBe(true)
+    expect(messages[0].content.endsWith(JSON.stringify(SCHEMA))).toBe(true)
+  })
+
+  it('sends Claude a text call at xhigh effort too, and without it once the model rejects it', async () => {
+    const fetch = stubFetch(
+      claudeReply('  Release notes  '),
+      error(400, { type: 'error', error: { type: 'invalid_request_error', message: 'This model does not support the effort parameter.' } }),
+      claudeReply('Release notes'),
+    )
+    const client = new ChatClient(CLAUDE, fetch)
+
+    const result = await client.generateText({ ...REQUEST, systemPrompt: '' })
+    await client.generateText({ ...REQUEST, systemPrompt: '' })
+
+    expect(result.text).toBe('Release notes')
+    const body = { model: 'test-model', max_tokens: 64000, messages: [{ role: 'user', content: 'user' }] }
+    expect(fetch.bodies).toEqual([{ ...body, output_config: { effort: 'xhigh' } }, { ...body, output_config: { effort: 'xhigh' } }, body])
+  })
+
+  it('leaves effort off for the rest of the run on a Claude model that rejects it, and keeps the schema', async () => {
+    const fetch = stubFetch(
+      error(400, { type: 'error', error: { type: 'invalid_request_error', message: 'This model does not support the effort parameter.' } }),
+      claudeReply('{"ok":true}'),
+      claudeReply('{"ok":true}'),
+    )
+    const client = new ChatClient(CLAUDE, fetch)
+
+    await client.generateJson(REQUEST, data => data)
+    await client.generateJson(REQUEST, data => data)
+
+    expect(fetch.bodies.map(body => body.output_config)).toEqual([
+      { format: { type: 'json_schema', schema: SCHEMA }, effort: 'xhigh' },
+      { format: { type: 'json_schema', schema: SCHEMA } },
+      { format: { type: 'json_schema', schema: SCHEMA } },
+    ])
+    expect(warn).toHaveBeenCalledOnce()
+    expect(sleep).not.toHaveBeenCalled()
   })
 
   it('sends a text call with only the model and messages', async () => {
@@ -146,10 +197,39 @@ describe('ChatClient replies', () => {
       reply([{ type: 'thinking', thinking: 'hmm' }, { type: 'text', text: '{"ok":' }, { type: 'text', text: 'true}' }]),
       reply('<think>Reasoning about {braces}.</think>\n```json\n{"ok":true}\n```'),
     )
-    const client = new ChatClient(CLAUDE, fetch)
+    const client = new ChatClient(OPENAI, fetch)
 
     expect((await client.generateJson(REQUEST, data => data)).data).toEqual({ ok: true })
     expect((await client.generateJson(REQUEST, data => data)).data).toEqual({ ok: true })
+  })
+
+  it('reads Claude\'s text blocks and usage, counting cached input and thinking that is broken out', async () => {
+    const fetch = stubFetch(
+      { content: [{ type: 'thinking', thinking: '' }, { type: 'text', text: '{"ok":' }, { type: 'text', text: 'true}' }], stop_reason: 'end_turn', usage: { input_tokens: 200, cache_read_input_tokens: 800, cache_creation_input_tokens: 50, output_tokens: 300, output_tokens_details: { thinking_tokens: 250 } } },
+      claudeReply('{"ok":true}'),
+    )
+    const client = new ChatClient(CLAUDE, fetch)
+
+    expect(await client.generateJson(REQUEST, data => data)).toEqual({ data: { ok: true }, inputTokens: 1050, cachedInputTokens: 800, outputTokens: 50, reasoningTokens: 250 })
+    expect(await client.generateJson(REQUEST, data => data)).toEqual({ data: { ok: true }, inputTokens: 100, cachedInputTokens: 0, outputTokens: 30, reasoningTokens: 0 })
+  })
+
+  it.each([
+    [claudeReply('', { stop_reason: 'refusal', stop_details: { type: 'refusal', category: 'cyber', explanation: 'The request was declined.' } }), 'api.anthropic.com declined to answer: The request was declined.'],
+    [claudeReply('', { stop_reason: 'refusal', stop_details: null }), 'api.anthropic.com declined to answer'],
+    [claudeReply('{"ok":', { stop_reason: 'max_tokens' }), 'api.anthropic.com stopped the reply at the output token limit'],
+  ])('fails a reply Claude refused or cut off without retrying', async (response, message) => {
+    const fetch = stubFetch(response)
+
+    await expect(new ChatClient(CLAUDE, fetch).generateJson(REQUEST, data => data)).rejects.toMatchObject({ kind: 'permanent', message })
+    expect(fetch).toHaveBeenCalledOnce()
+  })
+
+  it('retries a Claude reply with no text, and waits out an overload', async () => {
+    const fetch = stubFetch({ content: [{ type: 'thinking', thinking: '' }], stop_reason: 'end_turn' }, error(529, { type: 'error', error: { type: 'overloaded_error', message: 'Overloaded' } }), claudeReply('{"ok":true}'))
+
+    expect((await new ChatClient(CLAUDE, fetch).generateJson(REQUEST, data => data)).data).toEqual({ ok: true })
+    expect(sleep.mock.calls.map(([ms]) => ms)).toEqual([5000, 10000])
   })
 
   it('retries a reply that is empty, not JSON, or rejected by the parser, and then fails', async () => {
@@ -344,10 +424,10 @@ describe('ChatClient errors', () => {
 })
 
 describe('describeReasoning', () => {
-  it('states the reasoning a JSON call gets, and that Claude ignores reasoning_effort', () => {
+  it('states the reasoning a JSON call gets', () => {
     expect(describeReasoning('api.openai.com')).toBe('reasoning: high')
     expect(describeReasoning('generativelanguage.googleapis.com')).toBe('reasoning: high')
-    expect(describeReasoning('api.anthropic.com')).toBe('reasoning: provider default (api.anthropic.com ignores reasoning_effort)')
+    expect(describeReasoning('api.anthropic.com')).toBe('reasoning: xhigh')
     expect(describeReasoning('openrouter.ai')).toBe('reasoning: high if openrouter.ai honors reasoning_effort')
   })
 })

@@ -8,7 +8,7 @@ export interface ModelEnv {
   OPENAI_BASE_URL?: string | undefined;
 }
 
-// The Chat Completions endpoint that serves a model.
+// The endpoint that serves a model: Chat Completions, or the Messages API for Claude.
 export interface Endpoint {
   provider: ProviderId;
   model: string;
