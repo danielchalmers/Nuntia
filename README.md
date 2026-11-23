@@ -6,6 +6,8 @@
 
 Nuntia is a GitHub Action that writes release notes and migration guides with an AI model. When you publish a release, it reads the commits since the previous one and the issues and pull requests they reference, then writes highlights and upgrade steps into the release, above GitHub's own change list. It runs in your own workflow with your own model key, so there's no service to host.
 
+[MudBlazor](https://github.com/MudBlazor/MudBlazor) uses it for its releases. See the notes it wrote in [v9.13.0](https://github.com/MudBlazor/MudBlazor/releases/tag/v9.13.0).
+
 ## Quick start
 
 1. Add a model API key as a repository or organization secret: `GEMINI_API_KEY` ([get a free key](https://aistudio.google.com/apikey)), `ANTHROPIC_API_KEY` or `OPENAI_API_KEY`.
@@ -96,3 +98,7 @@ To try your own prompt without committing it, host it at a raw URL, such as a gi
 The notes go into the release and the job summary. The `artifacts/` directory holds them, along with the payload and context Nuntia sent. Upload it with `actions/upload-artifact` to keep it.
 
 A run fails only when something needs fixing: invalid configuration, a rejected key or unknown model, missing permissions, a prompt URL that can't be fetched, or a Full Changelog line naming a tag that no longer exists. A slow or overloaded provider, a refusal, or notes cut off at the output limit only leave a warning, so re-run the job to try again.
+
+## Related
+
+[AutoTriage](https://github.com/danielchalmers/AutoTriage) triages issues and pull requests by following a plain-text policy in your repo. It takes the same model keys as Nuntia.
