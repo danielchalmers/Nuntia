@@ -1,7 +1,7 @@
 {
   "name": "nuntia",
   "version": "0.1.0",
-  "description": "Generate AI-authored release notes and migration guides from a commit range.",
+  "description": "Write AI release notes and migration guides into each GitHub release, or preview the next one.",
   "type": "commonjs",
   "scripts": {
     "build": "npm run typecheck && npm run clean && esbuild src/index.ts --bundle --platform=node --target=node24 --format=cjs --minify --loader:.prompt=text --legal-comments=eof --outfile=dist/index.js",
